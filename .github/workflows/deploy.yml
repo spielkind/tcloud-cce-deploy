@@ -1,0 +1,176 @@
+name: Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: "Apply changes? (run without first to review plan)"
+        type: boolean
+        default: false
+      build_images:
+        description: "Build and push container images"
+        type: boolean
+        default: false
+  pull_request:
+    branches: [main]
+    paths: ["infra/**", "apps/**"]
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  pull-requests: write
+
+env:
+  TF_VAR_otc_access_key: ${{ secrets.OTC_ACCESS_KEY }}
+  TF_VAR_otc_secret_key: ${{ secrets.OTC_SECRET_KEY }}
+  TF_VAR_otc_domain_name: ${{ secrets.OTC_DOMAIN_NAME }}
+  AWS_ACCESS_KEY_ID: ${{ secrets.OTC_ACCESS_KEY }}
+  AWS_SECRET_ACCESS_KEY: ${{ secrets.OTC_SECRET_KEY }}
+
+jobs:
+  infra:
+    name: Infra
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: opentofu/setup-opentofu@v1
+        with:
+          tofu_version: "~1.8"
+
+      - name: OpenTofu Init
+        working-directory: infra
+        run: tofu init -input=false
+
+      - name: OpenTofu Format Check
+        working-directory: infra
+        run: tofu fmt -check -recursive -diff
+
+      - name: OpenTofu Validate
+        working-directory: infra
+        run: tofu validate
+
+      - name: OpenTofu Plan
+        working-directory: infra
+        run: |
+          set -o pipefail
+          tofu plan -input=false -no-color 2>&1 | tee plan-output.txt
+
+      - name: Plan Summary
+        if: always()
+        working-directory: infra
+        run: |
+          echo "## Infra Plan" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          cat plan-output.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: OpenTofu Apply
+        if: inputs.apply
+        working-directory: infra
+        run: tofu apply -auto-approve -input=false
+
+      - name: Summary
+        if: inputs.apply
+        working-directory: infra
+        run: |
+          echo "## Infra Deployed" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Output | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
+          echo "| Cluster | $(tofu output -raw cce_cluster_name) |" >> $GITHUB_STEP_SUMMARY
+          echo "| API Endpoint | $(tofu output -raw cce_api_endpoint) |" >> $GITHUB_STEP_SUMMARY
+          echo "| VPC | $(tofu output -raw vpc_id) |" >> $GITHUB_STEP_SUMMARY
+          echo "| Ingress ELB | $(tofu output -raw ingress_elb_public_ip 2>/dev/null || echo 'n/a') |" >> $GITHUB_STEP_SUMMARY
+          echo "| SWR Org | $(tofu output -raw swr_organization 2>/dev/null || echo 'n/a') |" >> $GITHUB_STEP_SUMMARY
+
+  build-images:
+    name: Build Images
+    needs: infra
+    if: inputs.apply && inputs.build_images
+    runs-on: ubuntu-latest
+    env:
+      SWR_ENDPOINT: swr.eu-de.otc.t-systems.com
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read tfvars
+        id: tfvars
+        run: |
+          echo "project_name=$(grep 'otc_project_name' infra/terraform.tfvars | cut -d'"' -f2)" >> "$GITHUB_OUTPUT"
+          echo "swr_org=$(grep 'name_prefix' infra/terraform.tfvars | cut -d'"' -f2)" >> "$GITHUB_OUTPUT"
+
+      - name: Login to SWR
+        run: |
+          LOGIN_KEY=$(printf "${{ secrets.OTC_ACCESS_KEY }}" | openssl dgst -binary -sha256 -hmac "${{ secrets.OTC_SECRET_KEY }}" | od -An -vtx1 | sed 's/[ \n]//g' | sed 'N;s/\n//')
+          echo "$LOGIN_KEY" | docker login ${{ env.SWR_ENDPOINT }} \
+            -u "${{ steps.tfvars.outputs.project_name }}@${{ secrets.OTC_ACCESS_KEY }}" \
+            --password-stdin
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build + push demo-app
+        uses: docker/build-push-action@v6
+        with:
+          context: apps/demo-app
+          push: true
+          tags: |
+            ${{ env.SWR_ENDPOINT }}/${{ steps.tfvars.outputs.swr_org }}/demo-app:${{ github.sha }}
+            ${{ env.SWR_ENDPOINT }}/${{ steps.tfvars.outputs.swr_org }}/demo-app:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: APP_VERSION=${{ github.sha }}
+          provenance: false
+
+  apps:
+    name: Apps
+    needs: build-images
+    if: |
+      always() &&
+      inputs.apply &&
+      needs.build-images.result != 'failure'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: opentofu/setup-opentofu@v1
+        with:
+          tofu_version: "~1.8"
+
+      - name: OpenTofu Init
+        working-directory: apps
+        run: tofu init -input=false
+
+      - name: OpenTofu Plan
+        working-directory: apps
+        run: |
+          set -o pipefail
+          tofu plan -input=false -no-color 2>&1 | tee plan-output.txt
+
+      - name: Plan Summary
+        if: always()
+        working-directory: apps
+        run: |
+          echo "## Apps Plan" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          cat plan-output.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: OpenTofu Apply
+        working-directory: apps
+        run: tofu apply -auto-approve -input=false
+
+      - name: Summary
+        working-directory: apps
+        run: |
+          echo "## Apps Deployed" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| App | URL |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
+          echo "| podinfo | $(tofu output -raw app_url 2>/dev/null || echo 'n/a') |" >> $GITHUB_STEP_SUMMARY
+          echo "| vault | $(tofu output -raw vault_url 2>/dev/null || echo 'n/a') |" >> $GITHUB_STEP_SUMMARY
+          echo "| demo-app | $(tofu output -raw demo_app_url 2>/dev/null || echo 'n/a') |" >> $GITHUB_STEP_SUMMARY

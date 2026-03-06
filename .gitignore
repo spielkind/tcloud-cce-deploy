@@ -1,0 +1,35 @@
+# Terraform
+*.tfstate
+*.tfstate.*
+*.tfplan
+.terraform/
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+*.auto.tfvars
+
+# Secrets
+*.pem
+*.key
+*credentials*
+.env
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.envrc
+terraform/.terraform.lock.hcl
+apps/.terraform.lock.hcl
+bootstrap/.terraform.lock.hcl
+.kubeconfig
+infra/.terraform.lock.hcl
+vault.keys

@@ -1,0 +1,86 @@
+# =============================================================================
+# Destroy Workflow — Plan (default) or Plan + Destroy (checkbox + confirm)
+# =============================================================================
+
+name: Destroy
+
+on:
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: "Execute destroy? (run without first to review plan)"
+        type: boolean
+        default: false
+      confirm:
+        description: 'Type "destroy" to confirm (required when apply=true)'
+        type: string
+        default: ""
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+env:
+  INFRA_DIR: infra
+  TF_VAR_otc_access_key: ${{ secrets.OTC_ACCESS_KEY }}
+  TF_VAR_otc_secret_key: ${{ secrets.OTC_SECRET_KEY }}
+  TF_VAR_otc_domain_name: ${{ secrets.OTC_DOMAIN_NAME }}
+  AWS_ACCESS_KEY_ID: ${{ secrets.OTC_ACCESS_KEY }}
+  AWS_SECRET_ACCESS_KEY: ${{ secrets.OTC_SECRET_KEY }}
+
+jobs:
+  destroy:
+    name: Destroy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Confirm check
+        if: inputs.apply && inputs.confirm != 'destroy'
+        run: |
+          echo "You must type 'destroy' in the confirm field to execute." >> $GITHUB_STEP_SUMMARY
+          exit 1
+
+      - uses: actions/checkout@v4
+
+      - uses: opentofu/setup-opentofu@v1
+        with:
+          tofu_version: "~1.8"
+
+      - name: OpenTofu Init (Apps)
+        working-directory: apps
+        run: tofu init -input=false
+
+      - name: OpenTofu Destroy Plan (Apps)
+        working-directory: apps
+        run: tofu plan -destroy -input=false -no-color
+
+      - name: OpenTofu Destroy (Apps)
+        if: inputs.apply
+        working-directory: apps
+        run: tofu destroy -auto-approve -input=false
+
+      - name: OpenTofu Init (Infra)
+        working-directory: infra
+        run: tofu init -input=false
+
+      - name: OpenTofu Destroy Plan (Infra)
+        working-directory: infra
+        run: |
+          tofu plan -destroy -input=false -no-color 2>&1 | tee plan-output.txt
+
+          echo "## Destroy Plan " >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          cat plan-output.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: Review reminder
+        if: ${{ !inputs.apply }}
+        run: echo "**Plan only** — re-run with apply checked and confirm='destroy' to execute." >> $GITHUB_STEP_SUMMARY
+
+      - name: OpenTofu Destroy (Infra)
+        if: inputs.apply
+        working-directory: infra
+        run: tofu destroy -auto-approve -input=false
+
+      - name: Summary
+        if: inputs.apply
+        run: echo "## All Resources Destroyed " >> $GITHUB_STEP_SUMMARY

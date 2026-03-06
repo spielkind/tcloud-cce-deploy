@@ -1,0 +1,4 @@
+image: ""
+hostname: ""
+vaultRole: "demo-app"
+vaultSecretPath: "kv/data/demo/config"
