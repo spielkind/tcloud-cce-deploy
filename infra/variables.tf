@@ -17,9 +17,14 @@ variable "otc_domain_name" {
 }
 
 variable "otc_project_name" {
-  description = "OTC Project Name"
+  description = "OTC project name (TF_VAR_otc_project_name, in CI from GitHub variable OTC_PROJECT_NAME)"
   type        = string
-  default     = "eu-de"
+}
+
+variable "reuse_existing_cce_agency" {
+  description = "Use an existing cce_admin_trust agency without managing it"
+  type        = bool
+  default     = false
 }
 
 variable "region" {
@@ -32,7 +37,7 @@ variable "region" {
 variable "name_prefix" {
   description = "Prefix for all resource names"
   type        = string
-  default     = "mic"
+  default     = "test"
 }
 
 variable "tags" {
@@ -40,7 +45,7 @@ variable "tags" {
   type        = map(string)
   default = {
     managed_by = "terraform"
-    project    = "mic"
+    project    = "test"
   }
 }
 
@@ -79,7 +84,7 @@ variable "bastion_cidrs" {
 variable "cluster_version" {
   description = "Kubernetes version"
   type        = string
-  default     = "v1.32"
+  default     = "v1.35"
 }
 
 variable "cluster_flavor" {
@@ -130,6 +135,12 @@ variable "node_flavor" {
   default     = "s3.xlarge.2"
 }
 
+variable "node_os" {
+  description = "Worker node OS (HCE OS 2.0 is recommended for v1.35+)"
+  type        = string
+  default     = "HCE OS 2.0"
+}
+
 variable "node_count" {
   description = "Number of worker nodes"
   type        = number
@@ -142,9 +153,15 @@ variable "ssh_public_key" {
 }
 
 variable "autoscaling_enabled" {
-  description = "Enable node pool autoscaling"
+  description = "Enable node pool autoscaling (installs the CCE autoscaler addon)"
   type        = bool
   default     = false
+}
+
+variable "autoscaler_version" {
+  description = "CCE autoscaler addon version (must match the cluster's minor version)"
+  type        = string
+  default     = "1.35.8"
 }
 
 # --- DNS ---
@@ -190,32 +207,37 @@ variable "create_lts" {
 variable "log_agent_version" {
   description = "CCE log-agent addon version"
   type        = string
-  default     = "1.7.6"
+  default     = "1.7.10"
 }
 
 variable "nginx_ingress_version" {
   description = "CCE nginx-ingress addon version"
   type        = string
-  default     = "5.0.2"
+  default     = "6.0.24"
 }
 
 variable "nginx_ingress_controller_tag" {
   description = "Full image tag (v<controller>_<addon>). Check addontemplates API for mapping."
   type        = string
-  default     = "v1.13.0_5.0.2"
+  default     = "v1.14.5_6.0.24"
 }
 
-# --- Vault Auto-Unseal ---
-variable "create_vault_unseal" {
-  description = "Create KMS key + OBS bucket for Vault auto-unseal"
+# --- OpenBao Auto-Unseal ---
+variable "create_openbao_unseal" {
+  description = "Create KMS key, OBS bucket and FunctionGraph function for OpenBao auto-unseal"
   type        = bool
   default     = false
 }
 
 # --- Workload Identity (OIDC) ---
 variable "create_workload_identity" {
-  description = "Create IAM OIDC identity provider for CCE workload identity"
+  description = "Create IAM OIDC identity provider for CCE workload identity (requires bind_api_eip)"
   type        = bool
   default     = false
+
+  validation {
+    condition     = !var.create_workload_identity || var.bind_api_eip
+    error_message = "create_workload_identity requires bind_api_eip = true: the cluster's JWKS is fetched via the public API endpoint."
+  }
 }
 

@@ -3,21 +3,27 @@ terraform {
     opentelekomcloud = {
       source = "opentelekomcloud/opentelekomcloud"
     }
+    random = {
+      source = "hashicorp/random"
+    }
   }
 }
 
 variable "name_prefix" { type = string }
-variable "create_vault_unseal" {
+variable "create_openbao_unseal" {
   type    = bool
   default = false
 }
-variable "otc_domain_name" {
-  type    = string
-  default = ""
+variable "project_name" { type = string }
+variable "namespace" {
+  description = "Kubernetes namespace of the OpenBao server"
+  type        = string
+  default     = "openbao"
 }
-variable "project_name" {
-  type    = string
-  default = "eu-de"
+variable "service_account" {
+  description = "ServiceAccount of the OpenBao server pods"
+  type        = string
+  default     = "openbao"
 }
 variable "tags" {
   type    = map(string)
@@ -40,13 +46,20 @@ variable "subnet_id" {
 }
 
 # =============================================================================
-# KMS Key for encrypting/decrypting Vault unseal keys
+# KMS Key for encrypting/decrypting OpenBao unseal keys
 # =============================================================================
-resource "opentelekomcloud_kms_key_v1" "vault" {
-  count = var.create_vault_unseal ? 1 : 0
+# Deleted KMS keys stay pending (with their alias) for 7 days, so the alias gets
+# a random suffix to allow destroy + redeploy within that window.
+resource "random_id" "kms_alias" {
+  count       = var.create_openbao_unseal ? 1 : 0
+  byte_length = 3
+}
 
-  key_alias       = "${var.name_prefix}-vault-unseal"
-  key_description = "Encrypts Vault unseal keys stored in OBS"
+resource "opentelekomcloud_kms_key_v1" "openbao" {
+  count = var.create_openbao_unseal ? 1 : 0
+
+  key_alias       = "${var.name_prefix}-openbao-unseal-${random_id.kms_alias[0].hex}"
+  key_description = "Encrypts OpenBao unseal keys stored in OBS"
   pending_days    = 7
   is_enabled      = true
   tags            = var.tags
@@ -55,12 +68,12 @@ resource "opentelekomcloud_kms_key_v1" "vault" {
 # =============================================================================
 # OBS Bucket for storing encrypted unseal keys
 # =============================================================================
-resource "opentelekomcloud_obs_bucket" "vault_unseal" {
-  count = var.create_vault_unseal ? 1 : 0
+resource "opentelekomcloud_obs_bucket" "openbao_unseal" {
+  count = var.create_openbao_unseal ? 1 : 0
 
-  bucket     = "${var.name_prefix}-vault-unseal"
-  acl        = "private"
-  versioning = true
+  bucket        = "${var.name_prefix}-openbao-unseal"
+  acl           = "private"
+  versioning    = true
   force_destroy = true
 
   lifecycle_rule {
@@ -80,7 +93,7 @@ resource "opentelekomcloud_obs_bucket" "vault_unseal" {
 # Custom KMS policy (decrypt only)
 # =============================================================================
 resource "opentelekomcloud_identity_role_v3" "kms_decrypt" {
-  count = var.create_vault_unseal ? 1 : 0
+  count = var.create_openbao_unseal ? 1 : 0
 
   description   = "Decrypt data via KMS"
   display_name  = "${var.name_prefix}-kms-decrypt"
@@ -99,7 +112,7 @@ resource "opentelekomcloud_identity_role_v3" "kms_decrypt" {
 # Custom OBS policy (GetObject only)
 # =============================================================================
 resource "opentelekomcloud_identity_role_v3" "obs_object_read" {
-  count = var.create_vault_unseal ? 1 : 0
+  count = var.create_openbao_unseal ? 1 : 0
 
   description   = "Read objects from OBS buckets"
   display_name  = "${var.name_prefix}-obs-object-read"
@@ -121,7 +134,7 @@ resource "opentelekomcloud_identity_role_v3" "obs_object_read" {
 # Custom VPC policy (FunctionGraph VPC access)
 # =============================================================================
 resource "opentelekomcloud_identity_role_v3" "fg_vpc_access" {
-  count = var.create_vault_unseal && var.enable_vpc_access ? 1 : 0
+  count = var.create_openbao_unseal && var.enable_vpc_access ? 1 : 0
 
   description   = "Minimal VPC permissions for FunctionGraph VPC access"
   display_name  = "${var.name_prefix}-fg-vpc-access"
@@ -143,11 +156,11 @@ resource "opentelekomcloud_identity_role_v3" "fg_vpc_access" {
 # =============================================================================
 # IAM Agency for FunctionGraph (KMS decrypt + OBS read)
 # =============================================================================
-resource "opentelekomcloud_identity_agency_v3" "vault_unseal" {
-  count = var.create_vault_unseal ? 1 : 0
+resource "opentelekomcloud_identity_agency_v3" "openbao_unseal" {
+  count = var.create_openbao_unseal ? 1 : 0
 
-  name                  = "${var.name_prefix}-vault-unseal"
-  description           = "FunctionGraph agency for Vault auto-unseal (KMS decrypt + OBS read)"
+  name                  = "${var.name_prefix}-openbao-unseal"
+  description           = "FunctionGraph agency for OpenBao auto-unseal (KMS decrypt + OBS read)"
   delegated_domain_name = "op_svc_cff"
 
   project_role {
@@ -167,26 +180,26 @@ resource "opentelekomcloud_identity_agency_v3" "vault_unseal" {
 }
 
 # =============================================================================
-# FunctionGraph: Vault unseal function
+# FunctionGraph: OpenBao unseal function
 # =============================================================================
-resource "opentelekomcloud_fgs_function_v2" "vault_unseal" {
-  count = var.create_vault_unseal ? 1 : 0
+resource "opentelekomcloud_fgs_function_v2" "openbao_unseal" {
+  count = var.create_openbao_unseal ? 1 : 0
 
-  name        = "${var.name_prefix}-vault-unseal"
+  name        = "${var.name_prefix}-openbao-unseal"
   app         = "default"
-  agency      = opentelekomcloud_identity_agency_v3.vault_unseal[0].name
-  description = "Reads encrypted Vault unseal keys from OBS and decrypts via KMS"
+  agency      = opentelekomcloud_identity_agency_v3.openbao_unseal[0].name
+  description = "Reads encrypted OpenBao unseal keys from OBS and decrypts via KMS"
   handler     = "index.handler"
   memory_size = 128
   timeout     = 90
-  runtime     = "Python3.9"
+  runtime     = "Python3.12"
   code_type   = "inline"
 
   func_code = base64encode(file("${path.module}/function/index.py"))
 
   user_data = jsonencode({
-    bucket     = opentelekomcloud_obs_bucket.vault_unseal[0].bucket
-    object_key = "vault-unseal/keys.enc"
+    bucket     = opentelekomcloud_obs_bucket.openbao_unseal[0].bucket
+    object_key = "openbao-unseal/keys.enc"
   })
 
   vpc_id     = var.vpc_id
@@ -199,41 +212,41 @@ resource "opentelekomcloud_fgs_function_v2" "vault_unseal" {
 # Outputs
 # =============================================================================
 output "kms_key_id" {
-  description = "KMS key ID for Vault unseal encryption"
-  value       = var.create_vault_unseal ? opentelekomcloud_kms_key_v1.vault[0].id : ""
+  description = "KMS key ID for OpenBao unseal encryption"
+  value       = var.create_openbao_unseal ? opentelekomcloud_kms_key_v1.openbao[0].id : ""
 }
 
 output "kms_key_arn" {
   description = "KMS key domain-scoped ID"
-  value       = var.create_vault_unseal ? opentelekomcloud_kms_key_v1.vault[0].domain_id : ""
+  value       = var.create_openbao_unseal ? opentelekomcloud_kms_key_v1.openbao[0].domain_id : ""
 }
 
 output "obs_bucket" {
   description = "OBS bucket name for encrypted unseal keys"
-  value       = var.create_vault_unseal ? opentelekomcloud_obs_bucket.vault_unseal[0].bucket : ""
+  value       = var.create_openbao_unseal ? opentelekomcloud_obs_bucket.openbao_unseal[0].bucket : ""
 }
 
 output "obs_bucket_endpoint" {
   description = "OBS bucket domain name"
-  value       = var.create_vault_unseal ? opentelekomcloud_obs_bucket.vault_unseal[0].bucket_domain_name : ""
+  value       = var.create_openbao_unseal ? opentelekomcloud_obs_bucket.openbao_unseal[0].bucket_domain_name : ""
 }
 
 output "function_urn" {
   description = "FunctionGraph function URN"
-  value       = var.create_vault_unseal ? opentelekomcloud_fgs_function_v2.vault_unseal[0].urn : ""
+  value       = var.create_openbao_unseal ? opentelekomcloud_fgs_function_v2.openbao_unseal[0].urn : ""
 }
 
 output "agency_name" {
   description = "IAM agency name for FunctionGraph"
-  value       = var.create_vault_unseal ? opentelekomcloud_identity_agency_v3.vault_unseal[0].name : ""
+  value       = var.create_openbao_unseal ? opentelekomcloud_identity_agency_v3.openbao_unseal[0].name : ""
 }
 
 # =============================================================================
 # Workload Identity: FG Invoke Policy
 # =============================================================================
 resource "opentelekomcloud_identity_role_v3" "fg_invoke" {
-  count         = var.create_vault_unseal ? 1 : 0
-  description   = "FunctionGraph read + invoke (vault auto-unseal)"
+  count         = var.create_openbao_unseal ? 1 : 0
+  description   = "FunctionGraph read + invoke (OpenBao auto-unseal)"
   display_name  = "${var.name_prefix}-fg-invoke"
   display_layer = "project"
   statement {
@@ -247,10 +260,10 @@ resource "opentelekomcloud_identity_role_v3" "fg_invoke" {
 }
 
 output "workload" {
-  description = "Workload identity definition for vault (namespace, SA, role IDs)"
-  value = var.create_vault_unseal ? {
-    namespace       = "vault"
-    service_account = "vault"
+  description = "Workload identity definition for OpenBao (namespace, SA, role IDs)"
+  value = var.create_openbao_unseal ? {
+    namespace       = var.namespace
+    service_account = var.service_account
     role_ids        = [opentelekomcloud_identity_role_v3.fg_invoke[0].id]
   } : null
 }

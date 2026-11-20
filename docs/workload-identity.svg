@@ -24,7 +24,7 @@
   <!-- Pod — large box spanning rows -->
   <rect x="220" y="85" width="110" height="210" rx="6" fill="#228be6" opacity="0.9"/>
   <text x="275" y="110" fill="#fff" font-size="14" font-weight="700" text-anchor="middle">Pod</text>
-  <text x="275" y="128" fill="#fff" font-size="10" text-anchor="middle">myapp / myapp</text>
+  <text x="275" y="128" fill="#fff" font-size="9" text-anchor="middle">openbao / openbao</text>
   <text x="275" y="148" fill="#fff" font-size="8" text-anchor="middle" opacity="0.6">/var/run/secrets/</text>
   <text x="275" y="160" fill="#fff" font-size="8" text-anchor="middle" opacity="0.6">tokens/oidc-token</text>
 

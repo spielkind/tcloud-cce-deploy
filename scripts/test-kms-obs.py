@@ -7,15 +7,13 @@ Usage: ./scripts/test-kms-obs.py [kms-key-id] [obs-bucket]
 import base64
 import json
 import os
-import re
 import subprocess
 import sys
 from urllib.request import Request, urlopen
-from urllib.error import HTTPError
 
 REGION = "eu-de"
 OBS_ENDPOINT = f"https://obs.{REGION}.otc.t-systems.com"
-OBJECT_KEY = "vault-unseal/test-keys.enc"
+OBJECT_KEY = "openbao-unseal/test-keys.enc"
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 INFRA_DIR = os.path.join(SCRIPT_DIR, "..", "infra")
 
@@ -24,10 +22,8 @@ AK = os.environ.get("TF_VAR_otc_access_key") or sys.exit("Set TF_VAR_otc_access_
 SK = os.environ.get("TF_VAR_otc_secret_key") or sys.exit("Set TF_VAR_otc_secret_key")
 DOMAIN = os.environ.get("TF_VAR_otc_domain_name") or sys.exit("Set TF_VAR_otc_domain_name")
 
-# Project name from tfvars
-with open(os.path.join(INFRA_DIR, "terraform.tfvars")) as f:
-    m = re.search(r'otc_project_name\s*=\s*"(.+?)"', f.read())
-    PROJECT_NAME = m.group(1) if m else sys.exit("otc_project_name not found in tfvars")
+# Project name from TF_VAR_otc_project_name
+PROJECT_NAME = os.environ.get("TF_VAR_otc_project_name") or sys.exit("Set TF_VAR_otc_project_name")
 
 
 def get_token_and_project_id():
@@ -148,8 +144,8 @@ def main():
         obs_bucket = sys.argv[2]
     else:
         print("=== Reading from terraform output ===")
-        kms_key_id = get_tf_output("vault_unseal_kms_key_id")
-        obs_bucket = get_tf_output("vault_unseal_obs_bucket")
+        kms_key_id = get_tf_output("openbao_unseal_kms_key_id")
+        obs_bucket = get_tf_output("openbao_unseal_obs_bucket")
         if not kms_key_id or not obs_bucket:
             sys.exit("Could not read terraform outputs. Pass <kms-key-id> <obs-bucket> as args.")
 
@@ -162,7 +158,7 @@ def main():
     print(f"Project ID: {project_id}")
     print(f"Token: {token[:20]}...")
 
-    test_data = "vault-unseal-key-1:abc123,vault-unseal-key-2:def456,vault-unseal-key-3:ghi789"
+    test_data = "unseal-key-1:abc123,unseal-key-2:def456,unseal-key-3:ghi789"
 
     print("\n=== 1. KMS Encrypt ===")
     print(f"Plaintext: {test_data}")

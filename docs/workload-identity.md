@@ -40,7 +40,7 @@ kubectl get --raw /openid/v1/jwks
 create_workload_identity = true
 ```
 
-The JWKS is fetched automatically via `data.external` when `create_workload_identity = true`.
+The JWKS is fetched automatically via `data.external` when `create_workload_identity = true`. This uses the public CCE API endpoint, so `bind_api_eip = true` is required (enforced by variable validation).
 
 ### 3. Apply
 
@@ -80,8 +80,8 @@ OIDC=$(cat /var/run/secrets/tokens/oidc-token)
 IAM_TOKEN=$(curl -si -X POST \
   "https://iam.eu-de.otc.t-systems.com/v3.0/OS-AUTH/id-token/tokens" \
   -H "Content-Type: application/json" \
-  -H "X-Idp-Id: <prefix>-workload-id" \
-  -d '{"auth":{"id_token":{"id":"'"$OIDC"'"},"scope":{"project":{"name":"<project>"}}}}' \
+  -H "X-Idp-Id: test-workload-id" \
+  -d '{"auth":{"id_token":{"id":"'"$OIDC"'"},"scope":{"project":{"name":"eu-de_<project>"}}}}' \
   | grep X-Subject-Token | awk '{print $2}' | tr -d '\r')
 
 # Use IAM token for OTC API calls
@@ -119,6 +119,12 @@ module "workload_identity" {
 The workload-identity module is generic — it handles OIDC setup, group creation,
 mapping rules, and role assignments for any number of workloads.
 
+Current workloads:
+
+| Module | ServiceAccount | Permissions |
+|---|---|---|
+| `openbao_unseal` | `system:serviceaccount:openbao:openbao` | FunctionGraph invoke (auto-unseal, see [OpenBao Auto-Unseal](openbao-unseal.md)) |
+
 ## Token Details
 
 | Property | Value |
@@ -142,6 +148,7 @@ mapping rules, and role assignments for any number of workloads.
 | Variable | Default | Description |
 |---|---|---|
 | `create_workload_identity` | `false` | Enable OIDC workload identity |
+| `otc_project_name` | — (required) | Project scope for the token exchange — set via `TF_VAR_otc_project_name` (GitHub Actions: repository variable `OTC_PROJECT_NAME`) |
 
 ## References
 

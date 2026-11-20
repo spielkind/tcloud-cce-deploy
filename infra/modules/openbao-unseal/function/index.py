@@ -18,7 +18,7 @@ KMS_URL = f"https://kms.{REGION}.otc.t-systems.com/v1.0"
 def obs_get(bucket, object_key, ak, sk, security_token):
     """Read an object from OBS using S3 V2 signing with STS credentials."""
     obs_url = f"https://{bucket}.obs.{REGION}.otc.t-systems.com/{object_key}"
-    now = datetime.datetime.utcnow()
+    now = datetime.datetime.now(datetime.timezone.utc)
     date_str = now.strftime("%a, %d %b %Y %H:%M:%S GMT")
 
     resource = f"/{bucket}/{object_key}"
@@ -40,15 +40,15 @@ def obs_get(bucket, object_key, ak, sk, security_token):
     return urlopen(req).read().decode().strip()
 
 
-def vault_status(vault_addr):
-    """Check Vault seal status. Returns (sealed, initialized) or (None, None) on error."""
+def bao_status(bao_addr):
+    """Check OpenBao seal status. Returns (sealed, initialized) or (None, None) on error."""
     try:
-        req = Request(f"{vault_addr}/v1/sys/health", method="GET")
+        req = Request(f"{bao_addr}/v1/sys/health", method="GET")
         resp = urlopen(req)
         data = json.loads(resp.read())
         return data.get("sealed", True), data.get("initialized", False)
     except HTTPError as e:
-        # Vault returns 503 when sealed, 501 when uninitialized
+        # OpenBao returns 503 when sealed, 501 when uninitialized
         try:
             data = json.loads(e.read())
             return data.get("sealed", True), data.get("initialized", False)
@@ -58,11 +58,11 @@ def vault_status(vault_addr):
         return None, None
 
 
-def vault_unseal(vault_addr, unseal_keys):
-    """Unseal Vault by submitting unseal keys one at a time."""
+def bao_unseal(bao_addr, unseal_keys):
+    """Unseal OpenBao by submitting unseal keys one at a time."""
     results = []
     for i, key in enumerate(unseal_keys):
-        url = f"{vault_addr}/v1/sys/unseal"
+        url = f"{bao_addr}/v1/sys/unseal"
         body = json.dumps({"key": key}).encode()
         try:
             req = Request(url, data=body, headers={"Content-Type": "application/json"}, method="PUT")
@@ -73,7 +73,7 @@ def vault_unseal(vault_addr, unseal_keys):
             results.append({"key": i + 1, "sealed": sealed, "progress": progress, "threshold": threshold})
             logger.info(f"key {i + 1}: sealed={sealed} progress={progress}/{threshold}")
             if not sealed:
-                logger.info("Vault is unsealed!")
+                logger.info("OpenBao is unsealed!")
                 break
         except HTTPError as e:
             body_err = e.read().decode() if hasattr(e, 'read') else str(e)
@@ -84,11 +84,11 @@ def vault_unseal(vault_addr, unseal_keys):
 
 def handler(event, context):
     """
-    Read encrypted Vault unseal keys from OBS, decrypt via KMS, unseal Vault.
+    Read encrypted OpenBao unseal keys from OBS, decrypt via KMS, unseal OpenBao.
 
     Expected event:
-      {"bucket": "...", "vault_addr": "http://vault.vault.svc:8200"}
-      Optional: {"object_key": "vault-unseal/keys.enc"}
+      {"bucket": "...", "bao_addr": "http://openbao.openbao.svc:8200"}
+      Optional: {"object_key": "openbao-unseal/keys.enc"}
     """
     token = context.getToken()
     project_id = context.getProjectID()
@@ -108,32 +108,32 @@ def handler(event, context):
         pass
 
     bucket = event.get("bucket", "") or user_data.get("bucket", "")
-    object_key = event.get("object_key", "") or user_data.get("object_key", "vault-unseal/keys.enc")
-    vault_addr = event.get("vault_addr", "")
+    object_key = event.get("object_key", "") or user_data.get("object_key", "openbao-unseal/keys.enc")
+    bao_addr = event.get("bao_addr", "")
 
     if not bucket:
         return {"statusCode": 400, "body": "missing bucket in user_data and event"}
-    if not vault_addr:
-        return {"statusCode": 400, "body": "missing vault_addr"}
+    if not bao_addr:
+        return {"statusCode": 400, "body": "missing bao_addr"}
 
-    # Wait for Vault to become reachable (pod may still be starting)
+    # Wait for OpenBao to become reachable (pod may still be starting)
     max_retries = int(event.get("max_retries", 10))
     wait_interval = int(event.get("wait", 5))
     for attempt in range(1, max_retries + 1):
         logger.info(f"attempt {attempt}/{max_retries}: waiting {wait_interval}s")
         time.sleep(wait_interval)
-        sealed, initialized = vault_status(vault_addr)
+        sealed, initialized = bao_status(bao_addr)
         if sealed is not None:
             break
-        logger.info(f"Vault not reachable at {vault_addr}")
+        logger.info(f"OpenBao not reachable at {bao_addr}")
     else:
-        return {"statusCode": 502, "body": f"Vault not reachable after {max_retries * wait_interval}s at {vault_addr}"}
+        return {"statusCode": 502, "body": f"OpenBao not reachable after {max_retries * wait_interval}s at {bao_addr}"}
 
     if not initialized:
-        logger.info("Vault is not initialized yet — nothing to unseal")
+        logger.info("OpenBao is not initialized yet — nothing to unseal")
         return {"statusCode": 200, "body": json.dumps({"unsealed": False, "reason": "not initialized"})}
     if not sealed:
-        logger.info("Vault is already unsealed")
+        logger.info("OpenBao is already unsealed")
         return {"statusCode": 200, "body": json.dumps({"unsealed": True, "reason": "already unsealed"})}
 
     # 1. Read encrypted data from OBS
@@ -172,9 +172,9 @@ def handler(event, context):
     unseal_keys = [k.strip() for k in unseal_keys_raw.split(",") if k.strip()]
     logger.info(f"got {len(unseal_keys)} unseal keys")
 
-    # 4. Unseal Vault
-    logger.info(f"unsealing Vault at {vault_addr}")
-    unseal_results = vault_unseal(vault_addr, unseal_keys)
+    # 4. Unseal OpenBao
+    logger.info(f"unsealing OpenBao at {bao_addr}")
+    unseal_results = bao_unseal(bao_addr, unseal_keys)
 
     final_sealed = unseal_results[-1].get("sealed", True) if unseal_results else True
     return {

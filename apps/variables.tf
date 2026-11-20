@@ -1,16 +1,22 @@
 # =============================================================================
-# App versions
+# Versions
 # =============================================================================
 variable "cert_manager_version" {
   description = "cert-manager Helm chart version"
   type        = string
-  default     = "1.17.1"
+  default     = "v1.21.3"
 }
 
-variable "vault_chart_version" {
-  description = "Vault Helm chart version"
+variable "podinfo_version" {
+  description = "podinfo Helm chart version"
   type        = string
-  default     = "0.29.1"
+  default     = "6.17.0"
+}
+
+variable "openbao_chart_version" {
+  description = "OpenBao Helm chart version"
+  type        = string
+  default     = "0.30.8"
 }
 
 # =============================================================================
@@ -22,29 +28,35 @@ variable "create_podinfo" {
   default     = true
 }
 
-variable "create_vault" {
-  description = "Deploy HashiCorp Vault (HA + Injector)"
+variable "create_openbao" {
+  description = "Deploy OpenBao (HA Raft + Agent Injector)"
+  type        = bool
+  default     = false
+}
+
+variable "create_demo_app" {
+  description = "Deploy OpenBao demo app (requires create_openbao)"
   type        = bool
   default     = false
 }
 
 # =============================================================================
-# Vault
+# OpenBao
 # =============================================================================
-variable "vault_replicas" {
-  description = "Number of Vault server replicas (odd numbers for Raft quorum)"
+variable "openbao_replicas" {
+  description = "Number of OpenBao server replicas (odd numbers for Raft quorum)"
   type        = number
   default     = 3
 }
 
-variable "vault_hostname" {
-  description = "Subdomain for Vault UI/API (prepended to DNS zone)"
+variable "openbao_hostname" {
+  description = "Subdomain for OpenBao UI/API (prepended to DNS zone)"
   type        = string
-  default     = "vault"
+  default     = "openbao"
 }
 
-variable "vault_storage_size" {
-  description = "PVC size per Vault replica"
+variable "openbao_storage_size" {
+  description = "PVC size per OpenBao replica"
   type        = string
   default     = "10Gi"
 }
@@ -52,21 +64,14 @@ variable "vault_storage_size" {
 # =============================================================================
 # Demo App
 # =============================================================================
-variable "create_demo_app" {
-  description = "Deploy Vault demo app"
-  type        = bool
-  default     = false
-}
-
 variable "demo_app_hostname" {
   description = "Subdomain for demo app"
   type        = string
   default     = "demo"
 }
 
-
-
-variable "otc_project_name" {
-  description = "OTC project name (e.g. eu-de_MIC_POC)"
+variable "demo_app_image_tag" {
+  description = "Demo app image tag in SWR (CI sets the commit SHA of the last image build)"
   type        = string
+  default     = "latest"
 }

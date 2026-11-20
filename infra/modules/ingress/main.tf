@@ -27,13 +27,13 @@ variable "tags" {
 
 variable "nginx_ingress_version" {
   type    = string
-  default = "5.0.2"
+  default = "6.0.24"
 }
 
 variable "nginx_ingress_controller_tag" {
   type        = string
   description = "Full image tag: v<controller>_<addon>. Check addontemplates API for correct mapping."
-  default     = "v1.13.0_5.0.2"
+  default     = "v1.14.5_6.0.24"
 }
 
 # --- EIP ---
@@ -138,11 +138,8 @@ variable "zone_id" {
 }
 
 variable "zone_name" {
-
-  type = string
-
+  type    = string
   default = ""
-
 }
 
 variable "create_dns_record" {

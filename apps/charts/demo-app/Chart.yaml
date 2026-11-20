@@ -1,4 +1,4 @@
 apiVersion: v2
 name: demo-app
-version: 0.1.0
-description: Vault demo app — reads secrets via Vault Agent Injector
+version: 0.4.0
+description: OpenBao demo app — reads secrets via the OpenBao Agent Injector

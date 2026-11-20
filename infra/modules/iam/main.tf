@@ -7,12 +7,21 @@ terraform {
 }
 
 variable "project_name" {
-  type    = string
-  default = "eu-de_MIC_POC"
+  type = string
+}
+
+variable "reuse_existing_cce_agency" {
+  type    = bool
+  default = false
+}
+
+locals {
+  cce_agency_name = "cce_admin_trust"
 }
 
 resource "opentelekomcloud_identity_agency_v3" "cce" {
-  name                  = "cce_admin_trust"
+  count                 = var.reuse_existing_cce_agency ? 0 : 1
+  name                  = local.cce_agency_name
   description           = "Created by Terraform to auto create cce related resources"
   delegated_domain_name = "op_svc_cce"
 
@@ -35,5 +44,5 @@ resource "opentelekomcloud_identity_agency_v3" "cce" {
 }
 
 output "agency_name" {
-  value = opentelekomcloud_identity_agency_v3.cce.name
+  value = var.reuse_existing_cce_agency ? local.cce_agency_name : opentelekomcloud_identity_agency_v3.cce[0].name
 }

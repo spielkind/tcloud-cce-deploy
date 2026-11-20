@@ -9,10 +9,9 @@ resource "helm_release" "cert_manager" {
   namespace        = "cert-manager"
   create_namespace = true
 
-  set {
-    name  = "crds.enabled"
-    value = "true"
-  }
+  values = [yamlencode({
+    crds = { enabled = true }
+  })]
 }
 
 resource "helm_release" "cluster_issuer" {
@@ -20,10 +19,9 @@ resource "helm_release" "cluster_issuer" {
   chart     = "${path.module}/charts/cluster-issuer"
   namespace = "cert-manager"
 
-  set {
-    name  = "email"
-    value = "admin@${local.zone_name}"
-  }
+  values = [yamlencode({
+    email = "admin@${local.zone_name}"
+  })]
 
   depends_on = [helm_release.cert_manager]
 }

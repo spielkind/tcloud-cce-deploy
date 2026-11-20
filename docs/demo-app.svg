@@ -17,7 +17,7 @@
 
   <rect width="800" height="520" fill="url(#bg)" rx="12"/>
 
-  <text x="400" y="35" text-anchor="middle" fill="#fff" font-size="18" font-weight="700">Demo App — SWR + Vault Integration</text>
+  <text x="400" y="35" text-anchor="middle" fill="#fff" font-size="18" font-weight="700">OpenBao Demo — SWR + OpenBao Integration</text>
 
   <!-- Row 1: External -->
   <rect x="40" y="60" width="160" height="50" rx="8" fill="url(#card)" stroke="#4a6fa5" stroke-width="1"/>
@@ -26,7 +26,7 @@
 
   <rect x="320" y="60" width="160" height="50" rx="8" fill="url(#card)" stroke="#3498db" stroke-width="1"/>
   <text x="400" y="82" text-anchor="middle" fill="#3498db" font-size="11" font-weight="600">📦 SWR</text>
-  <text x="400" y="97" text-anchor="middle" fill="#889" font-size="9">Container Registry</text>
+  <text x="400" y="97" text-anchor="middle" fill="#889" font-size="9">test-&lt;random&gt;/demo-app:&lt;sha&gt;</text>
 
   <rect x="600" y="60" width="160" height="50" rx="8" fill="#2d3a5a" stroke="#4a6fa5" stroke-width="1"/>
   <text x="680" y="90" text-anchor="middle" fill="#e0e0e0" font-size="12" font-weight="600">🌐 Browser</text>
@@ -58,27 +58,28 @@
   <text x="132" y="328" text-anchor="middle" fill="#889" font-size="9">read: file</text>
   <text x="132" y="342" text-anchor="middle" fill="#889" font-size="9">write: API</text>
 
-  <!-- Vault Agent -->
+  <!-- OpenBao Agent -->
   <rect x="218" y="282" width="125" height="70" rx="6" fill="url(#card)" stroke="#f1c40f" stroke-width="1"/>
-  <text x="280" y="310" text-anchor="middle" fill="#f1c40f" font-size="12" font-weight="600">🔑 Vault Agent</text>
+  <text x="280" y="310" text-anchor="middle" fill="#f1c40f" font-size="11" font-weight="600">🔑 OpenBao Agent</text>
   <text x="280" y="328" text-anchor="middle" fill="#889" font-size="9">sidecar</text>
-  <text x="280" y="342" text-anchor="middle" fill="#889" font-size="9">→ /vault/secrets/</text>
+  <text x="280" y="342" text-anchor="middle" fill="#889" font-size="8">→ /vault/secrets/config</text>
 
-  <!-- Vault HA (RIGHT side) -->
+  <!-- OpenBao HA (RIGHT side) -->
   <rect x="540" y="280" width="200" height="80" rx="8" fill="url(#card)" stroke="#f1c40f" stroke-width="1"/>
-  <text x="640" y="308" text-anchor="middle" fill="#f1c40f" font-size="14" font-weight="700">🔐 Vault HA</text>
+  <text x="640" y="308" text-anchor="middle" fill="#f1c40f" font-size="14" font-weight="700">🔐 OpenBao HA</text>
   <text x="640" y="328" text-anchor="middle" fill="#889" font-size="10">kv/demo/config</text>
   <text x="640" y="344" text-anchor="middle" fill="#889" font-size="9">K8s auth + userpass</text>
+  <text x="640" y="356" text-anchor="middle" fill="#667" font-size="8">openbao.openbao.svc:8200</text>
 
   <!-- SWR → Pod (image pull) -->
   <path d="M400,110 L400,210 L115,210 L115,248" fill="none" stroke="#3498db" stroke-width="1.2" stroke-dasharray="4,2" marker-end="url(#a4)"/>
   <text x="260" y="225" fill="#3498db" font-size="9">image pull</text>
 
-  <!-- Vault Agent → Vault (READ: fetch secrets, solid) -->
+  <!-- OpenBao Agent → OpenBao (READ: fetch secrets, solid) -->
   <line x1="343" y1="305" x2="538" y2="305" stroke="#f1c40f" stroke-width="1.5" marker-end="url(#a3)"/>
   <text x="430" y="298" fill="#f1c40f" font-size="9">read secrets</text>
 
-  <!-- Flask → Vault (WRITE: API, dashed red, routed below) -->
+  <!-- Flask → OpenBao (WRITE: API, dashed red, routed below) -->
   <path d="M132,352 L132,420 L640,420 L640,362" fill="none" stroke="#e74c3c" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#a5)" stroke-linejoin="round"/>
   <text x="380" y="438" fill="#e74c3c" font-size="9">write via API</text>
 
@@ -86,7 +87,7 @@
   <line x1="50" y1="490" x2="80" y2="490" stroke="#f1c40f" stroke-width="1.5"/>
   <text x="85" y="494" fill="#889" font-size="9">Read (Injector → file)</text>
   <line x1="230" y1="490" x2="260" y2="490" stroke="#e74c3c" stroke-width="1.5" stroke-dasharray="4,3"/>
-  <text x="265" y="494" fill="#889" font-size="9">Write (Flask → Vault API)</text>
+  <text x="265" y="494" fill="#889" font-size="9">Write (Flask → OpenBao API)</text>
   <line x1="440" y1="490" x2="470" y2="490" stroke="#3498db" stroke-width="1.2" stroke-dasharray="4,2"/>
   <text x="475" y="494" fill="#889" font-size="9">Image pull (SWR)</text>
 </svg>

@@ -28,7 +28,7 @@ variable "tags" {
 }
 
 locals {
-  subnet_cidr     = var.subnet_cidr != "" ? var.subnet_cidr : cidrsubnet(var.vpc_cidr, 8, 1)
+  subnet_cidr       = var.subnet_cidr != "" ? var.subnet_cidr : cidrsubnet(var.vpc_cidr, 8, 1)
   create_eni_subnet = var.eni_subnet_cidr != ""
 }
 

@@ -95,17 +95,21 @@ output "swr_endpoint" {
   value = module.swr.endpoint
 }
 
-# --- Vault Auto-Unseal ---
-output "vault_unseal_kms_key_id" {
-  value = module.vault_unseal.kms_key_id
+# --- OpenBao Auto-Unseal ---
+output "otc_project_name" {
+  value = var.otc_project_name
 }
 
-output "vault_unseal_obs_bucket" {
-  value = module.vault_unseal.obs_bucket
+output "openbao_unseal_kms_key_id" {
+  value = module.openbao_unseal.kms_key_id
 }
 
-output "vault_unseal_function_urn" {
-  value = module.vault_unseal.function_urn
+output "openbao_unseal_obs_bucket" {
+  value = module.openbao_unseal.obs_bucket
+}
+
+output "openbao_unseal_function_urn" {
+  value = module.openbao_unseal.function_urn
 }
 
 output "workload_identity_provider_id" {

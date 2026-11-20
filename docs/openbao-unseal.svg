@@ -12,24 +12,24 @@
   </defs>
 
   <rect width="960" height="380" fill="url(#bg)" rx="12"/>
-  <text x="480" y="28" fill="#e9ecef" font-size="16" font-weight="700" text-anchor="middle">Vault Auto-Unseal — Init Container Flow</text>
+  <text x="480" y="28" fill="#e9ecef" font-size="16" font-weight="700" text-anchor="middle">OpenBao Auto-Unseal — Init Container Flow</text>
 
   <!-- ==================== ROW 1: CCE Cluster ==================== -->
   <!-- Cluster boundary -->
   <rect x="20" y="45" width="295" height="215" rx="8" fill="none" stroke="#2a4a6b" stroke-width="1.5" stroke-dasharray="6,4"/>
-  <text x="167" y="60" fill="#868e96" font-size="9" text-anchor="middle">CCE Cluster — Vault Pod</text>
+  <text x="167" y="60" fill="#868e96" font-size="9" text-anchor="middle">CCE Cluster — OpenBao Pod (ns openbao)</text>
 
   <!-- Init Container -->
   <rect x="35" y="72" width="130" height="50" rx="6" fill="#ff922b" opacity="0.9"/>
   <text x="100" y="95" fill="#fff" font-size="11" font-weight="700" text-anchor="middle">Init Container</text>
   <text x="100" y="110" fill="#fff" font-size="8" text-anchor="middle" opacity="0.8">runs first</text>
 
-  <!-- Vault -->
+  <!-- OpenBao -->
   <rect x="180" y="72" width="120" height="50" rx="6" fill="#ffd43b" opacity="0.9"/>
-  <text x="240" y="95" fill="#1a1a2e" font-size="11" font-weight="700" text-anchor="middle">Vault</text>
+  <text x="240" y="95" fill="#1a1a2e" font-size="11" font-weight="700" text-anchor="middle">OpenBao</text>
   <text x="240" y="110" fill="#1a1a2e" font-size="8" text-anchor="middle" opacity="0.7">sealed on start</text>
 
-  <!-- Arrow: Init finishes → Vault starts (small arrow between boxes) -->
+  <!-- Arrow: Init finishes → OpenBao starts (small arrow between boxes) -->
   <line x1="165" y1="97" x2="176" y2="97" stroke="#e9ecef" stroke-width="1.5" marker-end="url(#ar-orange)" opacity="0.5"/>
 
   <!-- ==================== STEP 1: Init → IAM ==================== -->
@@ -58,16 +58,16 @@
 
   <!-- ==================== FunctionGraph ==================== -->
   <rect x="375" y="70" width="195" height="195" rx="8" fill="#7048e8" opacity="0.15" stroke="#7048e8" stroke-width="1"/>
-  <text x="472" y="86" fill="#845ef7" font-size="9" text-anchor="middle">FunctionGraph</text>
+  <text x="472" y="86" fill="#845ef7" font-size="9" text-anchor="middle">FunctionGraph · test-openbao-unseal</text>
 
   <rect x="390" y="95" width="165" height="55" rx="6" fill="#7048e8" opacity="0.9"/>
   <text x="472" y="116" fill="#fff" font-size="12" font-weight="700" text-anchor="middle">Unseal Function</text>
-  <text x="472" y="133" fill="#fff" font-size="9" text-anchor="middle" opacity="0.8">Python · runs inside VPC</text>
+  <text x="472" y="133" fill="#fff" font-size="9" text-anchor="middle" opacity="0.8">Python 3.12 · runs inside VPC</text>
 
   <!-- Retry loop indicator -->
   <rect x="390" y="160" width="165" height="35" rx="5" fill="#5f3dc4" opacity="0.6"/>
   <text x="472" y="176" fill="#e9ecef" font-size="9" text-anchor="middle">↻ retry every 5s (max 10×)</text>
-  <text x="472" y="188" fill="#e9ecef" font-size="8" text-anchor="middle" opacity="0.7">wait for Vault to be reachable</text>
+  <text x="472" y="188" fill="#e9ecef" font-size="8" text-anchor="middle" opacity="0.7">wait for OpenBao to be reachable</text>
 
   <!-- Step 3 badge -->
   <circle cx="472" cy="215" r="11" fill="#4dabf7"/>
@@ -76,7 +76,7 @@
   <!-- ==================== OBS ==================== -->
   <rect x="640" y="70" width="160" height="55" rx="6" fill="#228be6" opacity="0.9"/>
   <text x="720" y="93" fill="#fff" font-size="12" font-weight="700" text-anchor="middle">OBS</text>
-  <text x="720" y="110" fill="#fff" font-size="9" text-anchor="middle" opacity="0.8">vault-unseal/keys.enc</text>
+  <text x="720" y="110" fill="#fff" font-size="9" text-anchor="middle" opacity="0.8">openbao-unseal/keys.enc</text>
 
   <!-- Arrow FG → OBS -->
   <line x1="555" y1="110" x2="636" y2="100" stroke="#4dabf7" stroke-width="2" marker-end="url(#ar-blue)" stroke-dasharray="5,3"/>
@@ -91,15 +91,15 @@
   <line x1="555" y1="130" x2="636" y2="165" stroke="#20c997" stroke-width="2" marker-end="url(#ar-teal)" stroke-dasharray="5,3"/>
   <text x="596" y="155" fill="#20c997" font-size="8" text-anchor="middle">decrypt</text>
 
-  <!-- ==================== STEP 4: FG → Vault unseal ==================== -->
+  <!-- ==================== STEP 4: FG → OpenBao unseal ==================== -->
   <circle cx="340" cy="130" r="11" fill="#51cf66"/>
   <text x="340" y="134" fill="#fff" font-size="10" font-weight="700" text-anchor="middle">4</text>
 
-  <!-- Arrow FG → back to Vault -->
+  <!-- Arrow FG → back to OpenBao -->
   <path d="M 390 120 L 340 120 L 340 97 L 304 97" fill="none" stroke="#51cf66" stroke-width="2.5" marker-end="url(#ar-green)" stroke-dasharray="6,3"/>
   <text x="340" y="86" fill="#51cf66" font-size="8" text-anchor="middle">PUT /v1/sys/unseal</text>
 
-  <!-- Unsealed badge on Vault -->
+  <!-- Unsealed badge on OpenBao -->
   <rect x="180" y="130" width="120" height="22" rx="4" fill="#51cf66" opacity="0.25"/>
   <text x="240" y="145" fill="#51cf66" font-size="9" font-weight="600" text-anchor="middle">✓ Unsealed — Ready</text>
 
@@ -115,7 +115,7 @@
 
   <circle cx="50" cy="345" r="8" fill="#845ef7"/>
   <text x="50" y="349" fill="#fff" font-size="8" font-weight="700" text-anchor="middle">2</text>
-  <text x="65" y="349" fill="#adb5bd" font-size="9">Calls FunctionGraph async (202) → init exits → Vault starts</text>
+  <text x="65" y="349" fill="#adb5bd" font-size="9">Calls FunctionGraph async (202) → init exits → OpenBao starts</text>
 
   <circle cx="500" cy="322" r="8" fill="#4dabf7"/>
   <text x="500" y="326" fill="#fff" font-size="8" font-weight="700" text-anchor="middle">3</text>
@@ -123,5 +123,5 @@
 
   <circle cx="500" cy="345" r="8" fill="#51cf66"/>
   <text x="500" y="349" fill="#fff" font-size="8" font-weight="700" text-anchor="middle">4</text>
-  <text x="515" y="349" fill="#adb5bd" font-size="9">Unseals Vault via API — no secrets in cluster, no sidecars</text>
+  <text x="515" y="349" fill="#adb5bd" font-size="9">Unseals OpenBao via API — no secrets in cluster, no sidecars</text>
 </svg>

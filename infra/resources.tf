@@ -34,8 +34,9 @@ resource "opentelekomcloud_compute_keypair_v2" "this" {
 
 # --- IAM Agency (CCE authorization) ---
 module "iam" {
-  source       = "./modules/iam"
-  project_name = var.otc_project_name
+  source                    = "./modules/iam"
+  project_name              = var.otc_project_name
+  reuse_existing_cce_agency = var.reuse_existing_cce_agency
 }
 
 # --- CCE Cluster ---
@@ -70,11 +71,25 @@ module "node_pool" {
   name_prefix         = var.name_prefix
   cluster_id          = module.cce.cluster_id
   node_flavor         = var.node_flavor
+  node_os             = var.node_os
   node_count          = var.node_count
   key_pair            = opentelekomcloud_compute_keypair_v2.this.name
   subnet_id           = module.vpc.subnet_network_id
   autoscaling_enabled = var.autoscaling_enabled
   tags                = var.tags
+}
+
+# --- Cluster Autoscaler (only with autoscaling_enabled) ---
+module "autoscaler" {
+  source = "./modules/autoscaler"
+
+  create_autoscaler  = var.autoscaling_enabled
+  cluster_id         = module.cce.cluster_id
+  project_id         = data.opentelekomcloud_identity_project_v3.current.id
+  autoscaler_version = var.autoscaler_version
+  region             = var.region
+
+  depends_on = [module.node_pool]
 }
 
 # --- DNS (optional) ---
@@ -94,17 +109,17 @@ module "dns" {
 module "ingress" {
   source = "./modules/ingress"
 
-  cluster_id            = module.cce.cluster_id
-  vpc_id                = module.vpc.vpc_id
-  subnet_id             = module.vpc.subnet_v2_id
-  name_prefix           = var.name_prefix
-  create_ingress        = var.create_ingress
+  cluster_id                   = module.cce.cluster_id
+  vpc_id                       = module.vpc.vpc_id
+  subnet_id                    = module.vpc.subnet_v2_id
+  name_prefix                  = var.name_prefix
+  create_ingress               = var.create_ingress
   nginx_ingress_version        = var.nginx_ingress_version
   nginx_ingress_controller_tag = var.nginx_ingress_controller_tag
-  zone_id               = module.dns.zone_id
-  zone_name             = var.dns_zone_name
-  create_dns_record     = var.create_dns
-  tags                  = var.tags
+  zone_id                      = module.dns.zone_id
+  zone_name                    = var.dns_zone_name
+  create_dns_record            = var.create_dns
+  tags                         = var.tags
 
   depends_on = [module.node_pool]
 }
@@ -112,12 +127,12 @@ module "ingress" {
 module "nat" {
   source = "./modules/nat"
 
-  name_prefix    = var.name_prefix
-  vpc_id         = module.vpc.vpc_id
-  subnet_id      = module.vpc.subnet_id
-  eni_subnet_id  = module.vpc.eni_subnet_network_id
+  name_prefix     = var.name_prefix
+  vpc_id          = module.vpc.vpc_id
+  subnet_id       = module.vpc.subnet_id
+  eni_subnet_id   = module.vpc.eni_subnet_network_id
   create_eni_snat = var.eni_subnet_cidr != ""
-  tags           = var.tags
+  tags            = var.tags
 }
 # --- Log Agent (CCE log collection tool) ---
 module "log_agent" {
@@ -154,26 +169,25 @@ module "swr" {
 }
 
 # =============================================================================
-# Vault Auto-Unseal (KMS + OBS)
+# OpenBao Auto-Unseal (KMS + OBS + FunctionGraph)
 # =============================================================================
-module "vault_unseal" {
-  source = "./modules/vault-unseal"
+module "openbao_unseal" {
+  source = "./modules/openbao-unseal"
 
-  name_prefix         = var.name_prefix
-  create_vault_unseal = var.create_vault_unseal
-  otc_domain_name     = var.otc_domain_name
-  project_name        = var.otc_project_name
-  vpc_id              = module.vpc.vpc_id
-  subnet_id           = module.vpc.subnet_network_id
-  enable_vpc_access   = true
-  tags                = var.tags
+  name_prefix           = var.name_prefix
+  create_openbao_unseal = var.create_openbao_unseal
+  project_name          = var.otc_project_name
+  vpc_id                = module.vpc.vpc_id
+  subnet_id             = module.vpc.subnet_network_id
+  enable_vpc_access     = true
+  tags                  = var.tags
 }
 
 # =============================================================================
 # Fetch JWKS from CCE cluster for workload identity
 # =============================================================================
 data "external" "jwks" {
-  count   = var.create_workload_identity ? 1 : 0
+  count = var.create_workload_identity ? 1 : 0
   program = ["bash", "-c", <<-EOF
     KUBECONFIG=$(mktemp)
     SERVER="https://${module.cce.cluster_api_public_ip}:5443"
@@ -214,8 +228,8 @@ module "workload_identity" {
   create_workload_identity = var.create_workload_identity
   signing_key              = var.create_workload_identity ? data.external.jwks[0].result.jwks : ""
   project_id               = data.opentelekomcloud_identity_project_v3.current.id
-  workloads                = var.create_workload_identity ? [
-    for w in [module.vault_unseal.workload] : w if w != null
+  workloads = var.create_workload_identity ? [
+    for w in [module.openbao_unseal.workload] : w if w != null
   ] : []
-  tags                     = var.tags
+  tags = var.tags
 }

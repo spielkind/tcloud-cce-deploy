@@ -10,7 +10,7 @@ variable "name_prefix" { type = string }
 variable "cluster_flavor" { type = string }
 variable "cluster_version" {
   type    = string
-  default = "v1.32"
+  default = "v1.35"
 }
 variable "vpc_id" { type = string }
 variable "subnet_id" { type = string }

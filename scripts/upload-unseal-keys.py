@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-Upload Vault unseal keys to OBS (KMS encrypted).
-Reads keys from vault.keys file or stdin.
+Upload OpenBao unseal keys to OBS (KMS encrypted).
+Reads keys from an openbao.keys.* file (written by openbao-init.sh) or stdin.
 
 Usage:
-  ./scripts/upload-unseal-keys.py <vault-keys-file>
+  ./scripts/upload-unseal-keys.py <openbao-keys-file>
   ./scripts/upload-unseal-keys.py  (reads from stdin)
 """
 import base64
@@ -18,7 +18,7 @@ from urllib.request import Request, urlopen
 
 REGION = "eu-de"
 OBS_ENDPOINT = f"https://obs.{REGION}.otc.t-systems.com"
-OBJECT_KEY = "vault-unseal/keys.enc"
+OBJECT_KEY = "openbao-unseal/keys.enc"
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 INFRA_DIR = os.path.join(SCRIPT_DIR, "..", "infra")
 
@@ -26,9 +26,7 @@ AK = os.environ.get("TF_VAR_otc_access_key") or sys.exit("Set TF_VAR_otc_access_
 SK = os.environ.get("TF_VAR_otc_secret_key") or sys.exit("Set TF_VAR_otc_secret_key")
 DOMAIN = os.environ.get("TF_VAR_otc_domain_name") or sys.exit("Set TF_VAR_otc_domain_name")
 
-with open(os.path.join(INFRA_DIR, "terraform.tfvars")) as f:
-    m = re.search(r'otc_project_name\s*=\s*"(.+?)"', f.read())
-    PROJECT_NAME = m.group(1) if m else sys.exit("otc_project_name not found in tfvars")
+PROJECT_NAME = os.environ.get("TF_VAR_otc_project_name") or sys.exit("Set TF_VAR_otc_project_name")
 
 
 def get_token_and_project_id():
@@ -68,8 +66,8 @@ def get_tf_output(name):
     return None
 
 
-def parse_vault_keys(content):
-    """Extract unseal keys from vault.keys file."""
+def parse_unseal_keys(content):
+    """Extract unseal keys from an openbao.keys.* file."""
     keys = []
     for line in content.strip().splitlines():
         m = re.match(r'Unseal Key \d+:\s*(.+)', line)
@@ -81,20 +79,20 @@ def parse_vault_keys(content):
 
 
 def main():
-    # Read vault keys
+    # Read unseal keys
     if len(sys.argv) > 1:
         with open(sys.argv[1]) as f:
             content = f.read()
     else:
-        print("Paste vault.keys content (Ctrl+D when done):")
+        print("Paste openbao.keys content (Ctrl+D when done):")
         content = sys.stdin.read()
 
-    unseal_keys = parse_vault_keys(content)
+    unseal_keys = parse_unseal_keys(content)
     print(f"Found {len(unseal_keys)} unseal keys")
 
     # Get KMS key ID and bucket
-    kms_key_id = get_tf_output("vault_unseal_kms_key_id")
-    obs_bucket = get_tf_output("vault_unseal_obs_bucket")
+    kms_key_id = get_tf_output("openbao_unseal_kms_key_id")
+    obs_bucket = get_tf_output("openbao_unseal_obs_bucket")
     if not kms_key_id or not obs_bucket:
         sys.exit("Could not read terraform outputs")
 
@@ -146,7 +144,7 @@ def main():
 
     print(f"Stored: s3://{obs_bucket}/{OBJECT_KEY}")
     print(f"\nSUCCESS: {len(unseal_keys)} unseal keys encrypted and uploaded")
-    print(f"\nTo test the FunctionGraph function, invoke with:")
+    print("\nTo test the FunctionGraph function, invoke with:")
     print(f'  {{"bucket": "{obs_bucket}", "object_key": "{OBJECT_KEY}", "kms_key_id": "{kms_key_id}"}}')
 
 

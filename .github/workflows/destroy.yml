@@ -25,6 +25,7 @@ env:
   TF_VAR_otc_access_key: ${{ secrets.OTC_ACCESS_KEY }}
   TF_VAR_otc_secret_key: ${{ secrets.OTC_SECRET_KEY }}
   TF_VAR_otc_domain_name: ${{ secrets.OTC_DOMAIN_NAME }}
+  TF_VAR_otc_project_name: ${{ vars.OTC_PROJECT_NAME }}
   AWS_ACCESS_KEY_ID: ${{ secrets.OTC_ACCESS_KEY }}
   AWS_SECRET_ACCESS_KEY: ${{ secrets.OTC_SECRET_KEY }}
 
@@ -36,14 +37,15 @@ jobs:
       - name: Confirm check
         if: inputs.apply && inputs.confirm != 'destroy'
         run: |
-          echo "You must type 'destroy' in the confirm field to execute." >> $GITHUB_STEP_SUMMARY
+          echo "You must type 'destroy' in the confirm field to execute." >> "$GITHUB_STEP_SUMMARY"
           exit 1
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: opentofu/setup-opentofu@v1
+      - uses: opentofu/setup-opentofu@v2
         with:
-          tofu_version: "~1.8"
+          tofu_version: "~1.13"
+          tofu_wrapper: false
 
       - name: OpenTofu Init (Apps)
         working-directory: apps
@@ -65,22 +67,33 @@ jobs:
       - name: OpenTofu Destroy Plan (Infra)
         working-directory: infra
         run: |
+          set -o pipefail
           tofu plan -destroy -input=false -no-color 2>&1 | tee plan-output.txt
 
-          echo "## Destroy Plan " >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          cat plan-output.txt >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
+          {
+            echo "## Destroy Plan "
+            echo '```'
+            cat plan-output.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Review reminder
         if: ${{ !inputs.apply }}
-        run: echo "**Plan only** — re-run with apply checked and confirm='destroy' to execute." >> $GITHUB_STEP_SUMMARY
+        run: echo "**Plan only** — re-run with apply checked and confirm='destroy' to execute." >> "$GITHUB_STEP_SUMMARY"
 
       - name: OpenTofu Destroy (Infra)
         if: inputs.apply
         working-directory: infra
-        run: tofu destroy -auto-approve -input=false
+        run: |
+          # FunctionGraph leaves its VPC access ports in the node subnet and SWR
+          # refuses to delete organizations with repositories — both block the
+          # destroy. Remove the function first, clean up, then destroy the rest.
+          NETWORK_ID=$(tofu output -raw subnet_id 2>/dev/null || true)
+          SWR_ORG=$(tofu output -raw swr_organization 2>/dev/null || true)
+          tofu destroy -auto-approve -input=false -target=module.openbao_unseal
+          python3 ../scripts/destroy-cleanup.py --network-id "$NETWORK_ID" --swr-org "$SWR_ORG"
+          tofu destroy -auto-approve -input=false
 
       - name: Summary
         if: inputs.apply
-        run: echo "## All Resources Destroyed " >> $GITHUB_STEP_SUMMARY
+        run: echo "## All Resources Destroyed " >> "$GITHUB_STEP_SUMMARY"

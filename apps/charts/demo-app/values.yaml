@@ -1,4 +1,12 @@
 image: ""
 hostname: ""
-vaultRole: "demo-app"
-vaultSecretPath: "kv/data/demo/config"
+baoAddr: "http://openbao.openbao.svc:8200"
+baoRole: "demo-app"
+secretPath: "kv/data/demo/config"
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi

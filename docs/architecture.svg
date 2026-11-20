@@ -20,7 +20,7 @@
   <!-- TITLE -->
   <!-- ═══════════════════════════════════════════════ -->
   <text x="450" y="32" text-anchor="middle" fill="#fff" font-size="16" font-weight="700">T-Cloud — CCE Turbo Deployment</text>
-  <text x="450" y="50" text-anchor="middle" fill="#888" font-size="11">eu-de</text>
+  <text x="450" y="50" text-anchor="middle" fill="#888" font-size="11">eu-de · test-cluster</text>
 
   <!-- ═══════════════════════════════════════════════ -->
   <!-- INTERNET -->
@@ -84,17 +84,17 @@
   <!-- ═══════════════════════════════════════════════ -->
   <rect x="65" y="300" width="570" height="232" rx="8" fill="#1a2540" stroke="#4a6fa5" stroke-width="1.5" filter="url(#shadow)"/>
   <text x="85" y="322" fill="#6ba3d6" font-size="13" font-weight="700">CCE Cluster</text>
-  <text x="230" y="322" fill="#889" font-size="10">eni (Yangtse) · rbac · v1.32</text>
+  <text x="230" y="322" fill="#889" font-size="10">eni (Yangtse) · rbac · ipvs · v1.35</text>
 
   <!-- Cluster components row -->
   <rect x="85" y="332" width="120" height="22" rx="11" fill="#162040" stroke="#58a6ff" stroke-width="1"/>
   <text x="145" y="347" text-anchor="middle" fill="#58a6ff" font-size="9" font-weight="600">API Server :5443</text>
 
   <rect x="215" y="332" width="120" height="22" rx="11" fill="#1e3a2a" stroke="#27ae60" stroke-width="1"/>
-  <text x="275" y="347" text-anchor="middle" fill="#27ae60" font-size="9" font-weight="600">nginx-ingress</text>
+  <text x="275" y="347" text-anchor="middle" fill="#27ae60" font-size="9" font-weight="600">nginx-ingress 6.0.24</text>
 
   <rect x="345" y="332" width="120" height="22" rx="11" fill="#2a1a2a" stroke="#e74c3c" stroke-width="1"/>
-  <text x="405" y="347" text-anchor="middle" fill="#e74c3c" font-size="9" font-weight="600">cert-manager</text>
+  <text x="405" y="347" text-anchor="middle" fill="#e74c3c" font-size="9" font-weight="600">cert-manager v1.21.3</text>
 
   <rect x="475" y="332" width="145" height="22" rx="11" fill="#2a1a3a" stroke="#9b59b6" stroke-width="1"/>
   <text x="547" y="347" text-anchor="middle" fill="#c39bd3" font-size="9">Security Group</text>
@@ -109,7 +109,7 @@
   <text x="170" y="386" text-anchor="middle" fill="#6ba3d6" font-size="10" font-weight="600">eu-de-01</text>
   <rect x="100" y="396" width="140" height="34" rx="4" fill="#2a3a5a"/>
   <text x="170" y="414" text-anchor="middle" fill="#ccc" font-size="10">Worker Node</text>
-  <text x="170" y="426" text-anchor="middle" fill="#889" font-size="8">s7n.xlarge.2</text>
+  <text x="170" y="426" text-anchor="middle" fill="#889" font-size="8">s7n.xlarge.2 · HCE OS 2.0</text>
   <rect x="100" y="436" width="65" height="22" rx="3" fill="#1e3a2a" stroke="#27ae60" stroke-width="0.5"/>
   <text x="132" y="451" text-anchor="middle" fill="#27ae60" font-size="8">podinfo</text>
   <rect x="170" y="436" width="70" height="22" rx="3" fill="#1e2a3a" stroke="#58a6ff" stroke-width="0.5"/>
@@ -119,13 +119,13 @@
   <rect x="170" y="462" width="70" height="22" rx="3" fill="#1a2a3a" stroke="#e74c3c" stroke-width="0.5"/>
   <text x="205" y="477" text-anchor="middle" fill="#e74c3c" font-size="8">log-agent</text>
   <rect x="100" y="490" width="140" height="18" rx="3" fill="#0d1117" opacity="0.5"/>
-  <text x="170" y="503" text-anchor="middle" fill="#666" font-size="7">+ your workloads</text>
+  <text x="170" y="503" text-anchor="middle" fill="#f1c40f" font-size="7">openbao-0 · demo-app</text>
 
   <rect x="268" y="366" width="170" height="152" rx="6" fill="#223050" stroke="#4a6fa5" stroke-width="1"/>
   <text x="353" y="386" text-anchor="middle" fill="#6ba3d6" font-size="10" font-weight="600">eu-de-02</text>
   <rect x="283" y="396" width="140" height="34" rx="4" fill="#2a3a5a"/>
   <text x="353" y="414" text-anchor="middle" fill="#ccc" font-size="10">Worker Node</text>
-  <text x="353" y="426" text-anchor="middle" fill="#889" font-size="8">s7n.xlarge.2</text>
+  <text x="353" y="426" text-anchor="middle" fill="#889" font-size="8">s7n.xlarge.2 · HCE OS 2.0</text>
   <rect x="283" y="436" width="65" height="22" rx="3" fill="#1e3a2a" stroke="#27ae60" stroke-width="0.5"/>
   <text x="315" y="451" text-anchor="middle" fill="#27ae60" font-size="8">podinfo</text>
   <rect x="353" y="436" width="70" height="22" rx="3" fill="#1e2a3a" stroke="#58a6ff" stroke-width="0.5"/>
@@ -133,13 +133,13 @@
   <rect x="283" y="462" width="140" height="22" rx="3" fill="#1a2a3a" stroke="#e74c3c" stroke-width="0.5"/>
   <text x="353" y="477" text-anchor="middle" fill="#e74c3c" font-size="8">log-agent</text>
   <rect x="283" y="490" width="140" height="18" rx="3" fill="#0d1117" opacity="0.5"/>
-  <text x="353" y="503" text-anchor="middle" fill="#666" font-size="7">+ your workloads</text>
+  <text x="353" y="503" text-anchor="middle" fill="#f1c40f" font-size="7">openbao-1</text>
 
   <rect x="451" y="366" width="170" height="152" rx="6" fill="#223050" stroke="#4a6fa5" stroke-width="1"/>
   <text x="536" y="386" text-anchor="middle" fill="#6ba3d6" font-size="10" font-weight="600">eu-de-03</text>
   <rect x="466" y="396" width="140" height="34" rx="4" fill="#2a3a5a"/>
   <text x="536" y="414" text-anchor="middle" fill="#ccc" font-size="10">Worker Node</text>
-  <text x="536" y="426" text-anchor="middle" fill="#889" font-size="8">s7n.xlarge.2</text>
+  <text x="536" y="426" text-anchor="middle" fill="#889" font-size="8">s7n.xlarge.2 · HCE OS 2.0</text>
   <rect x="466" y="436" width="65" height="22" rx="3" fill="#1e3a2a" stroke="#27ae60" stroke-width="0.5"/>
   <text x="498" y="451" text-anchor="middle" fill="#27ae60" font-size="8">podinfo</text>
   <rect x="536" y="436" width="70" height="22" rx="3" fill="#1e2a3a" stroke="#58a6ff" stroke-width="0.5"/>
@@ -147,7 +147,7 @@
   <rect x="466" y="462" width="140" height="22" rx="3" fill="#1a2a3a" stroke="#e74c3c" stroke-width="0.5"/>
   <text x="536" y="477" text-anchor="middle" fill="#e74c3c" font-size="8">log-agent</text>
   <rect x="466" y="490" width="140" height="18" rx="3" fill="#0d1117" opacity="0.5"/>
-  <text x="536" y="503" text-anchor="middle" fill="#666" font-size="7">+ your workloads</text>
+  <text x="536" y="503" text-anchor="middle" fill="#f1c40f" font-size="7">openbao-2</text>
 
   <!-- Arrow: Workers → NAT GW (outbound) -->
   <path d="M636,430 C645,390 645,330 742,282" stroke="#9b59b6" stroke-width="1.2" fill="none" stroke-dasharray="4 2" marker-end="url(#arrP)"/>
@@ -185,14 +185,14 @@
 
   <rect x="660" y="602" width="180" height="36" rx="6" fill="#1e2a4a" stroke="#e67e22" stroke-width="1"/>
   <text x="750" y="621" text-anchor="middle" fill="#e67e22" font-size="10" font-weight="700">KMS</text>
-  <text x="750" y="633" text-anchor="middle" fill="#889" font-size="8">State Encryption</text>
+  <text x="750" y="633" text-anchor="middle" fill="#889" font-size="8">State + OpenBao unseal keys</text>
 
   <!-- ═══════════════════════════════════════════════ -->
   <!-- GITHUB ACTIONS -->
   <!-- ═══════════════════════════════════════════════ -->
   <rect x="60" y="660" width="780" height="44" rx="8" fill="#161b22" stroke="#30363d" stroke-width="1"/>
   <text x="450" y="680" text-anchor="middle" fill="#58a6ff" font-size="12" font-weight="600">GitHub Actions</text>
-  <text x="450" y="696" text-anchor="middle" fill="#889" font-size="10">Job 1: Infra (VPC · CCE · DNS · NAT · ELB · Ingress · LTS)   →   Job 2: Apps (Helm · cert-manager · podinfo)</text>
+  <text x="450" y="696" text-anchor="middle" fill="#889" font-size="9">Infra (VPC · CCE · DNS · NAT · ELB · Ingress · LTS · SWR)  →  Build Images (optional)  →  Apps (cert-manager · podinfo · OpenBao · demo)</text>
 
   <!-- ═══════════════════════════════════════════════ -->
   <!-- LEGEND -->

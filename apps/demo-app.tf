@@ -2,22 +2,19 @@
 # Demo App (Helm)
 # =============================================================================
 resource "helm_release" "demo_app" {
-  count     = var.create_demo_app ? 1 : 0
+  count     = var.create_openbao && var.create_demo_app ? 1 : 0
   name      = "demo-app"
   chart     = "${path.module}/charts/demo-app"
   namespace = "default"
 
-  set {
-    name  = "image"
-    value = "${data.terraform_remote_state.infra.outputs.swr_endpoint}/${data.terraform_remote_state.infra.outputs.swr_organization}/demo-app:latest"
-  }
+  values = [yamlencode({
+    image    = "${local.infra.swr_endpoint}/${local.infra.swr_organization}/demo-app:${var.demo_app_image_tag}"
+    hostname = "${var.demo_app_hostname}.${local.zone_name}"
+    baoAddr  = "http://openbao.${kubernetes_namespace_v1.openbao[0].metadata[0].name}.svc:8200"
+  })]
 
-  set {
-    name  = "hostname"
-    value = "${var.demo_app_hostname}.${local.zone_name}"
-  }
+  # Pods need OpenBao initialization and Kubernetes auth, which are set up after deployment.
+  wait = false
 
-  timeout    = 120
-
-depends_on = [helm_release.cluster_issuer, helm_release.vault]
+  depends_on = [helm_release.cluster_issuer, helm_release.openbao]
 }

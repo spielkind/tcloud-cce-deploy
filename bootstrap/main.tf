@@ -1,19 +1,19 @@
 terraform {
-  required_version = ">= 1.5.0"
+  required_version = ">= 1.10.0"
   required_providers {
     opentelekomcloud = {
       source  = "opentelekomcloud/opentelekomcloud"
-      version = "~> 1.36"
+      version = "~> 1.37"
     }
     random = {
       source  = "hashicorp/random"
-      version = "~> 3.6"
+      version = "~> 3.9"
     }
   }
 }
 
 variable "name_prefix" {
-  default = "mic"
+  default = "test"
   type    = string
 }
 
@@ -32,10 +32,6 @@ variable "otc_secret_key" {
   sensitive = true
 }
 
-variable "otc_project_name" {
-  type    = string
-  default = "eu-de"
-}
 
 variable "otc_domain_name" {
   type = string
@@ -46,7 +42,7 @@ variable "tags" {
   type        = map(string)
   default = {
     managed_by = "terraform"
-    project    = "mic"
+    project    = "test"
   }
 }
 
@@ -54,7 +50,8 @@ provider "opentelekomcloud" {
   access_key  = var.otc_access_key
   secret_key  = var.otc_secret_key
   domain_name = var.otc_domain_name
-  tenant_name = var.otc_project_name
+  # OBS bucket encryption only accepts KMS keys from the region's base project.
+  tenant_name = var.region
   auth_url    = "https://iam.${var.region}.otc.t-systems.com/v3"
 }
 
