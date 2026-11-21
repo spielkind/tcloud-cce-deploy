@@ -15,3 +15,8 @@ openbao_storage_size = "10Gi"
 
 # Demo App
 demo_app_hostname = "demo"
+
+# GPU Demo (needs create_gpu_node_pool = true in infra)
+create_gpu_demo   = true
+gpu_demo_hostname = "image"
+gpu_demo_replicas = 1 # 0 = scale GPU node to zero

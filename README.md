@@ -25,6 +25,7 @@ Infrastructure-as-Code for deploying a managed Kubernetes cluster (CCE) on T-Clo
 | Security Group | Managed by CCE, extended with custom rules |
 | CCE Cluster | Kubernetes v1.35 — CCE Standard (overlay_l2/vpc-router) or CCE Turbo (eni/Yangtse) |
 | Node Pool | HCE OS 2.0, configurable flavor/count, optional autoscaling |
+| GPU Node Pool | `pi5e.2xlarge.4` (1× NVIDIA L4), autoscaled 0…1, NVIDIA GPU addon + driver (optional) |
 | SSH Key Pair | From your public key |
 | IAM Agency | `cce_admin_trust` — CCE trust delegation |
 | DNS Zone | Public or private zone (optional) |
@@ -49,6 +50,7 @@ Infrastructure-as-Code for deploying a managed Kubernetes cluster (CCE) on T-Clo
 | podinfo | 6.17.0 — hello world app with ingress at `https://hello.<zone>` (optional) |
 | OpenBao | Helm chart 0.30.8 (OpenBao v2.7.3) — HA secrets management with Raft storage + Injector at `https://openbao.<zone>` (optional) |
 | Demo App | Python Flask app — reads/writes OpenBao secrets, image from SWR, at `https://demo.<zone>` (optional) |
+| GPU Demo | Text-to-image (SDXL-Turbo, diffusers) on the GPU node pool at `https://image.<zone>` (optional) |
 
 With this repo's zone `otc.nodefall.de`: https://hello.otc.nodefall.de, https://openbao.otc.nodefall.de, https://demo.otc.nodefall.de.
 
@@ -56,6 +58,7 @@ See [OpenBao documentation](docs/openbao.md) for setup & usage.
 See [OpenBao Auto-Unseal](docs/openbao-unseal.md) for event-driven unsealing with FunctionGraph + KMS.
 See [Workload Identity](docs/workload-identity.md) for OIDC-based pod authentication (no AK/SK).
 See [Demo App documentation](docs/demo-app.md) for the OpenBao + SWR demo.
+See [GPU documentation](docs/gpu.md) for the GPU node pool, scale-to-zero and the text-to-image demo.
 
 ## Prerequisites
 
@@ -297,6 +300,12 @@ All other settings (SSH key, cluster config) are in `terraform.tfvars`.
 | `ssh_public_key` | — | **Required** — SSH public key |
 | `autoscaling_enabled` | `false` | Node pool autoscaling (1 … 2× `node_count`); installs the CCE autoscaler addon |
 | `autoscaler_version` | `1.35.8` | CCE autoscaler addon version (must match the cluster minor version) |
+| `create_gpu_node_pool` | `false` | GPU node pool (0…`gpu_node_max`) + NVIDIA GPU addon; also installs the autoscaler |
+| `gpu_node_flavor` | `pi5e.2xlarge.4` | GPU flavor (CCE Turbo: `g7`, `pi5e`, `p5e` only) |
+| `gpu_node_az` | `eu-de-01` | AZ for GPU nodes |
+| `gpu_node_max` | `1` | Maximum GPU nodes |
+| `gpu_addon_version` | `2.15.6` | CCE AI Suite (NVIDIA GPU) addon version |
+| `nvidia_driver_url` | 580.196.07 `.run` | NVIDIA Tesla driver installed on GPU nodes |
 | `bind_api_eip` | `false` | Bind public EIP to CCE API (kubectl from internet) |
 | `create_dns` | `false` | Create a DNS zone |
 | `dns_zone_name` | `cluster.internal.` | DNS zone name (trailing dot!) |
@@ -324,6 +333,11 @@ All other settings (SSH key, cluster config) are in `terraform.tfvars`.
 | `create_demo_app` | `false` | Deploy the OpenBao demo app |
 | `demo_app_hostname` | `demo` | Subdomain for the demo app (`demo.<zone>`) |
 | `demo_app_image_tag` | `latest` | Demo app image tag; the Deploy workflow sets the commit SHA of the last image build |
+| `create_gpu_demo` | `false` | GPU text-to-image demo (needs `create_gpu_node_pool`) |
+| `gpu_demo_hostname` | `image` | Subdomain for the GPU demo (`image.<zone>`) |
+| `gpu_demo_replicas` | `1` | `0` lets the autoscaler remove the GPU node |
+| `gpu_demo_model` | `stabilityai/sdxl-turbo` | Hugging Face text-to-image model |
+| `gpu_demo_image_tag` | `latest` | GPU demo image tag (set by the Deploy workflow) |
 
 The OTC project name is read from the infra remote state output `otc_project_name`.
 Outputs: `app_url`, `openbao_url`, `demo_app_url`.
@@ -381,7 +395,8 @@ Outputs: `app_url`, `openbao_url`, `demo_app_url`.
 │       ├── security-group/
 │       ├── cce/
 │       ├── node-pool/
-│       ├── autoscaler/           # CCE autoscaler addon (with autoscaling_enabled)
+│       ├── autoscaler/           # CCE autoscaler addon (autoscaling_enabled or GPU pool)
+│       ├── gpu-addon/            # CCE AI Suite (NVIDIA GPU) addon
 │       ├── iam/
 │       ├── dns/
 │       ├── ingress/
@@ -399,12 +414,15 @@ Outputs: `app_url`, `openbao_url`, `demo_app_url`.
 │   ├── podinfo.tf           # Hello world app (optional)
 │   ├── openbao.tf           # OpenBao HA + Injector (optional)
 │   ├── demo-app.tf          # OpenBao demo app (optional)
+│   ├── gpu-demo.tf          # GPU text-to-image demo (optional)
 │   ├── outputs.tf
 │   ├── terraform.tfvars
 │   └── charts/
 │       ├── cluster-issuer/
-│       └── demo-app/
+│       ├── demo-app/
+│       └── gpu-demo/
 ├── apps/demo-app/           # Demo app source (Dockerfile + Flask)
+├── apps/gpu-demo/           # GPU demo source (Dockerfile + FastAPI/diffusers)
 ├── .github/workflows/
 │   ├── deploy.yml           # Infra → Build Images (optional) → Apps
 │   ├── destroy.yml          # Destroy apps → unseal function → cleanup → infra

@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: gpu-demo-models
+  annotations:
+    # Keep the model cache when the release is uninstalled and reinstalled.
+    helm.sh/resource-policy: keep
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: {{ .Values.storage.storageClass | quote }}
+  resources:
+    requests:
+      storage: {{ .Values.storage.size }}

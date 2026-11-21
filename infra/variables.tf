@@ -158,6 +158,51 @@ variable "autoscaling_enabled" {
   default     = false
 }
 
+# --- GPU node pool (optional) ---
+variable "create_gpu_node_pool" {
+  description = "Add an autoscaling GPU node pool (0..gpu_node_max) and the CCE AI Suite (NVIDIA GPU) addon"
+  type        = bool
+  default     = false
+}
+
+variable "gpu_node_flavor" {
+  description = "GPU node flavor. CCE Turbo (eni) supports g7, pi5e and p5e only"
+  type        = string
+  default     = "pi5e.2xlarge.4" # 1x NVIDIA L4 24 GB, 8 vCPU, 32 GB
+
+  validation {
+    condition = can(regex(
+      var.container_network_type == "eni" ? "^(g7|pi5e|p5e)\\." : "^(g6|g7|p2s|p2v|p3|p5e|p5s|pi2|pi5e)\\.",
+      var.gpu_node_flavor
+    ))
+    error_message = "gpu_node_flavor must be a GPU flavor; CCE Turbo (eni) clusters support only g7, pi5e and p5e."
+  }
+}
+
+variable "gpu_node_az" {
+  description = "Availability zone for GPU nodes (GPU capacity differs per AZ)"
+  type        = string
+  default     = "eu-de-01"
+}
+
+variable "gpu_node_max" {
+  description = "Maximum number of GPU nodes (autoscaled from 0)"
+  type        = number
+  default     = 1
+}
+
+variable "gpu_addon_version" {
+  description = "CCE AI Suite (NVIDIA GPU) addon version (template gpu-beta)"
+  type        = string
+  default     = "2.15.6"
+}
+
+variable "nvidia_driver_url" {
+  description = "NVIDIA Tesla driver .run URL installed on GPU nodes"
+  type        = string
+  default     = "https://us.download.nvidia.com/tesla/580.196.07/NVIDIA-Linux-x86_64-580.196.07.run"
+}
+
 variable "autoscaler_version" {
   description = "CCE autoscaler addon version (must match the cluster's minor version)"
   type        = string

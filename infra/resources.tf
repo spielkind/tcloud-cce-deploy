@@ -79,11 +79,47 @@ module "node_pool" {
   tags                = var.tags
 }
 
-# --- Cluster Autoscaler (only with autoscaling_enabled) ---
+# --- GPU Node Pool (optional, scales 0..gpu_node_max) ---
+module "gpu_node_pool" {
+  count  = var.create_gpu_node_pool ? 1 : 0
+  source = "./modules/node-pool"
+
+  name_prefix         = var.name_prefix
+  pool_name           = "gpu"
+  cluster_id          = module.cce.cluster_id
+  node_flavor         = var.gpu_node_flavor
+  node_os             = var.node_os
+  node_count          = 0
+  autoscaling_enabled = true
+  min_node_count      = 0
+  max_node_count      = var.gpu_node_max
+  availability_zones  = [var.gpu_node_az]
+  priority            = 0
+  key_pair            = opentelekomcloud_compute_keypair_v2.this.name
+  subnet_id           = module.vpc.subnet_network_id
+  root_volume_size    = 100
+  k8s_labels          = { accelerator = "nvidia" }
+  taints              = [{ key = "nvidia.com/gpu", value = "present", effect = "NoSchedule" }]
+  tags                = var.tags
+}
+
+module "gpu_addon" {
+  source = "./modules/gpu-addon"
+
+  create_gpu_addon = var.create_gpu_node_pool
+  cluster_id       = module.cce.cluster_id
+  addon_version    = var.gpu_addon_version
+  driver_url       = var.nvidia_driver_url
+  region           = var.region
+
+  depends_on = [module.node_pool]
+}
+
+# --- Cluster Autoscaler (autoscaling_enabled or GPU pool) ---
 module "autoscaler" {
   source = "./modules/autoscaler"
 
-  create_autoscaler  = var.autoscaling_enabled
+  create_autoscaler  = var.autoscaling_enabled || var.create_gpu_node_pool
   cluster_id         = module.cce.cluster_id
   project_id         = data.opentelekomcloud_identity_project_v3.current.id
   autoscaler_version = var.autoscaler_version

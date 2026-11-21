@@ -119,3 +119,7 @@ output "workload_identity_provider_id" {
 output "workload_identity_client_id" {
   value = module.workload_identity.client_id
 }
+
+output "gpu_node_pool_enabled" {
+  value = var.create_gpu_node_pool
+}

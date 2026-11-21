@@ -42,7 +42,12 @@ node_flavor = "s7n.xlarge.2" # 4 vCPU, 8 GB RAM (Turbo-compatible)
 # node_os           = "HCE OS 2.0"               # default: HCE OS 2.0
 node_count          = 3
 autoscaling_enabled = false
-ssh_public_key      = "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQCqntLk7J/7hgeV0rNRsXQiEpRm+gI4CUo/proDV13aVHBYgqPLDFDWsiruIrM8ra7LfGOg5OBkQnE0if5ZITZXWVyo3YMD2CiN7o06az6CnhrYlYlTIVohzea5HLl7Psnf3en/uNkQehmBjUsJQaraJ7YXL09EuI27V/VNgzKlHGbyaH6DGqCNiswyFa39az3kS2cVQ+MAntWLQnGxymANTA+5bG5/0uri80b0Po+73DUqEg/2GQpxTr7ci8rXezB+jsDFzjC+qd+E5FeChqKNgN6RSxuOk4cQCbQdzyTie4JvnKLsBMJbHY3U1n65u9Ik+IwKlVWkdh7X4kHXSf9Z r.keutterling@telekom.de"
+
+# GPU node pool (scales 0..1; a node only exists while a GPU pod is scheduled)
+create_gpu_node_pool = true
+# gpu_node_flavor    = "pi5e.2xlarge.4"          # 1x NVIDIA L4 24 GB
+# gpu_node_az        = "eu-de-01"                # eu-de-03 if eu-de-01 is sold out
+ssh_public_key = "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQCqntLk7J/7hgeV0rNRsXQiEpRm+gI4CUo/proDV13aVHBYgqPLDFDWsiruIrM8ra7LfGOg5OBkQnE0if5ZITZXWVyo3YMD2CiN7o06az6CnhrYlYlTIVohzea5HLl7Psnf3en/uNkQehmBjUsJQaraJ7YXL09EuI27V/VNgzKlHGbyaH6DGqCNiswyFa39az3kS2cVQ+MAntWLQnGxymANTA+5bG5/0uri80b0Po+73DUqEg/2GQpxTr7ci8rXezB+jsDFzjC+qd+E5FeChqKNgN6RSxuOk4cQCbQdzyTie4JvnKLsBMJbHY3U1n65u9Ik+IwKlVWkdh7X4kHXSf9Z r.keutterling@telekom.de"
 
 # =============================================================================
 # DNS

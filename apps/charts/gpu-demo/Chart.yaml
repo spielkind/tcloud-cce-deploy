@@ -1,0 +1,4 @@
+apiVersion: v2
+name: gpu-demo
+version: 0.1.0
+description: GPU text-to-image demo (SDXL-Turbo) on a CCE GPU node

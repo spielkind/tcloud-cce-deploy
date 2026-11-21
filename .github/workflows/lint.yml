@@ -44,6 +44,7 @@ jobs:
         run: |
           helm lint apps/charts/cluster-issuer
           helm lint apps/charts/demo-app --set image=example,hostname=example.org
+          helm lint apps/charts/gpu-demo --set image=example,hostname=example.org
 
   scripts:
     name: Scripts and workflows
@@ -55,7 +56,7 @@ jobs:
         run: shellcheck scripts/*.sh
 
       - name: Ruff
-        run: pipx run ruff==0.17.6 check --isolated --select E,F,W --line-length 140 scripts apps/demo-app infra/modules/openbao-unseal/function
+        run: pipx run ruff==0.17.6 check --isolated --select E,F,W --line-length 140 scripts apps/demo-app apps/gpu-demo infra/modules/openbao-unseal/function
 
       - name: actionlint
         run: |

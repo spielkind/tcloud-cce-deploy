@@ -75,3 +75,41 @@ variable "demo_app_image_tag" {
   type        = string
   default     = "latest"
 }
+
+# =============================================================================
+# GPU Demo
+# =============================================================================
+variable "create_gpu_demo" {
+  description = "Deploy the GPU text-to-image demo (requires create_gpu_node_pool in infra)"
+  type        = bool
+  default     = false
+}
+
+variable "gpu_demo_hostname" {
+  description = "Subdomain for the GPU demo"
+  type        = string
+  default     = "image"
+}
+
+variable "gpu_demo_replicas" {
+  description = "0 = GPU node is scaled down by the autoscaler (~10 min), 1 = GPU node is running"
+  type        = number
+  default     = 1
+
+  validation {
+    condition     = contains([0, 1], var.gpu_demo_replicas)
+    error_message = "gpu_demo_replicas must be 0 or 1 (one GPU per node)."
+  }
+}
+
+variable "gpu_demo_model" {
+  description = "Hugging Face text-to-image model (SDXL-Turbo: Stability AI non-commercial community license)"
+  type        = string
+  default     = "stabilityai/sdxl-turbo"
+}
+
+variable "gpu_demo_image_tag" {
+  description = "GPU demo image tag in SWR (CI sets the commit SHA of the last image build)"
+  type        = string
+  default     = "latest"
+}
