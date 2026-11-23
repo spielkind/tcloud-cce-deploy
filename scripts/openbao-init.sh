@@ -1,4 +1,11 @@
 #!/usr/bin/env bash
+# Initializes the in-cluster OpenBao (openbao_mode = "cce" only): init, unseal,
+# Raft join, KV v2 + userpass + Kubernetes auth, root token revocation and the
+# optional KMS-encrypted upload of the unseal keys for FunctionGraph auto-unseal.
+#
+# VM mode (openbao_mode = "vm") is NOT handled here: SSH to the bastion and run
+# `sudo bao-init.sh` (KMS auto-unseal, AppRole, snapshots), then
+# scripts/demo-app-openbao-setup.sh.
 set -euo pipefail
 umask 077
 
@@ -12,8 +19,19 @@ trap 'if [[ -n "$TEMP_KUBECONFIG" ]]; then rm -f -- "$TEMP_KUBECONFIG"; fi' EXIT
 # Colors
 G='\033[0;32m' Y='\033[1;33m' R='\033[0;31m' N='\033[0m'
 
-echo -e "${Y}OpenBao Initial Setup${N}"
+echo -e "${Y}OpenBao Initial Setup (cce mode)${N}"
 echo ""
+
+if command -v tofu >/dev/null; then
+  MODE=$(tofu -chdir="$SCRIPT_DIR/../infra" output -raw openbao_mode 2>/dev/null || true)
+  if [[ -n "$MODE" && "$MODE" != "cce" ]]; then
+    echo -e "${R}infra openbao_mode is '$MODE'; this script only initializes the in-cluster (cce) OpenBao.${N}" >&2
+    if [[ "$MODE" == "vm" ]]; then
+      echo "VM mode: ssh to the bastion and run 'sudo bao-init.sh'." >&2
+    fi
+    exit 1
+  fi
+fi
 
 kubeconfig_usable() {
   [[ -s "$1" ]] && KUBECONFIG="$1" kubectl config current-context >/dev/null 2>&1
@@ -206,7 +224,7 @@ fi
 echo ""
 echo -e "${G}OpenBao is ready!${N}"
 echo ""
-echo "  UI:       $(tofu -chdir="$SCRIPT_DIR/../apps" output -raw openbao_url 2>/dev/null || echo "https://openbao.<your-zone>")"
+echo "  UI:       $(tofu -chdir="$SCRIPT_DIR/../workloads" output -raw openbao_url 2>/dev/null || echo "https://openbao.<your-zone>")"
 echo "  Login:    Username → $ADMIN_USER"
 echo "  Keys:     saved to $KEY_FILE"
 echo ""

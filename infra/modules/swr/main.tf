@@ -14,6 +14,12 @@ variable "organization" {
   type        = string
 }
 
+variable "region" {
+  description = "OTC region of the SWR endpoint"
+  type        = string
+  default     = "eu-de"
+}
+
 # SWR organization names are unique across all OTC tenants, so short names
 # like "test" are usually taken already.
 resource "random_id" "suffix" {
@@ -29,5 +35,5 @@ output "organization" {
 }
 
 output "endpoint" {
-  value = "swr.eu-de.otc.t-systems.com"
+  value = var.region == "eu-ch2" ? "swr.eu-ch2.sc.otc.t-systems.com" : "swr.${var.region}.otc.t-systems.com"
 }

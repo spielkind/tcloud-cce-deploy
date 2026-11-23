@@ -9,6 +9,11 @@ Remove leftovers that block `tofu destroy` of the infra project.
 Run after the FunctionGraph function is destroyed and before the full destroy:
   ./scripts/destroy-cleanup.py --network-id <subnet network id> --swr-org <org>
 
+OpenBao modes: only openbao_mode = "cce" uses the FunctionGraph unseal function.
+With "vm" or "disabled" no FunctionGraph ports exist and the port check is a
+no-op. The VM module (own VPC, NAT, ELB, ECS, versioned OBS bucket with
+force_destroy) is removed completely by `tofu destroy` and needs no cleanup.
+
 Credentials: TF_VAR_otc_access_key, TF_VAR_otc_secret_key, TF_VAR_otc_project_name.
 """
 import argparse
@@ -23,7 +28,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-REGION = "eu-de"
+REGION = os.environ.get("OTC_REGION", "eu-de")
 FG_PORT_NAME = "FunctionGraph-Access-VPC-Port"
 
 AK = os.environ.get("TF_VAR_otc_access_key") or sys.exit("Set TF_VAR_otc_access_key")

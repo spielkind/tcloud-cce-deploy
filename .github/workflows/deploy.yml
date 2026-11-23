@@ -11,12 +11,19 @@ on:
         description: "Build and push container images"
         type: boolean
         default: false
+      environment:
+        description: "Environment to plan/deploy"
+        type: choice
+        options: [dev, prod]
+        default: dev
   pull_request:
     branches: [main]
-    paths: ["infra/**", "apps/**"]
+    paths: ["infra/**", "workloads/**"]
 
 concurrency:
-  group: deploy
+  # Per environment (deploy + destroy share it); PR plans queue separately so
+  # they never replace a pending manual run.
+  group: ${{ github.event_name == 'pull_request' && format('plan-{0}', github.ref) || format('deploy-{0}', inputs.environment || 'dev') }}
   cancel-in-progress: false
 
 permissions:
@@ -24,29 +31,40 @@ permissions:
   pull-requests: write
 
 env:
-  TF_VAR_otc_access_key: ${{ secrets.OTC_ACCESS_KEY }}
-  TF_VAR_otc_secret_key: ${{ secrets.OTC_SECRET_KEY }}
-  TF_VAR_otc_domain_name: ${{ secrets.OTC_DOMAIN_NAME }}
-  TF_VAR_otc_project_name: ${{ vars.OTC_PROJECT_NAME }}
-  AWS_ACCESS_KEY_ID: ${{ secrets.OTC_ACCESS_KEY }}
-  AWS_SECRET_ACCESS_KEY: ${{ secrets.OTC_SECRET_KEY }}
+  DEPLOY_ENV: ${{ inputs.environment || 'dev' }}
+  TF_VAR_environment: ${{ inputs.environment || 'dev' }}
 
 jobs:
   infra:
     name: Infra
+    environment: ${{ inputs.environment || 'dev' }}
     runs-on: ubuntu-latest
+    env:
+      # Environment-scoped secrets/vars resolve only in jobs that reference the environment.
+      TF_VAR_otc_access_key: ${{ secrets.OTC_ACCESS_KEY }}
+      TF_VAR_otc_secret_key: ${{ secrets.OTC_SECRET_KEY }}
+      TF_VAR_otc_domain_name: ${{ secrets.OTC_DOMAIN_NAME }}
+      TF_VAR_otc_project_name: ${{ vars.OTC_PROJECT_NAME }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.OTC_ACCESS_KEY }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.OTC_SECRET_KEY }}
     outputs:
       swr_org: ${{ steps.infra_outputs.outputs.swr_org }}
+      swr_endpoint: ${{ steps.infra_outputs.outputs.swr_endpoint }}
       gpu_enabled: ${{ steps.infra_outputs.outputs.gpu_enabled }}
     steps:
+      - uses: actions/checkout@v7
+
       - name: Check configuration
         run: |
           if [ -z "$TF_VAR_otc_project_name" ]; then
-            echo "::error::Repository variable OTC_PROJECT_NAME is not set (Settings → Secrets and variables → Actions → Variables)."
+            echo "::error::Variable OTC_PROJECT_NAME is not set for environment '$DEPLOY_ENV' (Settings → Environments → $DEPLOY_ENV → Environment variables)."
             exit 1
           fi
-
-      - uses: actions/checkout@v7
+          # Environment files marked as template are not deployable yet.
+          if grep -q '^# STATUS: template' infra/envs/"$DEPLOY_ENV".tfvars workloads/envs/"$DEPLOY_ENV".tfvars; then
+            echo "::error::Environment '$DEPLOY_ENV' is not configured yet (infra/envs and workloads/envs contain '# STATUS: template')."
+            exit 1
+          fi
 
       - uses: opentofu/setup-opentofu@v2
         with:
@@ -55,7 +73,7 @@ jobs:
 
       - name: OpenTofu Init
         working-directory: infra
-        run: tofu init -input=false
+        run: tofu init -input=false -backend-config="envs/${DEPLOY_ENV}.backend.tfvars"
 
       - name: OpenTofu Format Check
         working-directory: infra
@@ -67,9 +85,12 @@ jobs:
 
       - name: OpenTofu Plan
         working-directory: infra
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.OTC_ACCESS_KEY }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.OTC_SECRET_KEY }}
         run: |
           set -o pipefail
-          tofu plan -input=false -no-color 2>&1 | tee plan-output.txt
+          tofu plan -var-file="envs/${DEPLOY_ENV}.tfvars" -input=false -no-color -out=tfplan 2>&1 | tee plan-output.txt
 
       - name: Plan Summary
         if: ${{ always() && hashFiles('infra/plan-output.txt') != '' }}
@@ -82,24 +103,35 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
+      # Apply exactly the plan shown above (no re-plan between review and apply).
       - name: OpenTofu Apply
         if: inputs.apply
         working-directory: infra
-        run: tofu apply -auto-approve -input=false
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.OTC_ACCESS_KEY }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.OTC_SECRET_KEY }}
+        run: tofu apply -input=false tfplan
 
       - name: Export outputs
         id: infra_outputs
         if: inputs.apply
         working-directory: infra
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.OTC_ACCESS_KEY }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.OTC_SECRET_KEY }}
         run: |
           {
             echo "swr_org=$(tofu output -raw swr_organization)"
+            echo "swr_endpoint=$(tofu output -raw swr_endpoint)"
             echo "gpu_enabled=$(tofu output -raw gpu_node_pool_enabled 2>/dev/null || echo false)"
           } >> "$GITHUB_OUTPUT"
 
       - name: Summary
         if: inputs.apply
         working-directory: infra
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.OTC_ACCESS_KEY }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.OTC_SECRET_KEY }}
         run: |
           {
             echo "## Infra Deployed"
@@ -117,18 +149,26 @@ jobs:
     name: Build Images
     needs: infra
     if: inputs.apply && inputs.build_images
+    environment: ${{ inputs.environment || 'dev' }}
     runs-on: ubuntu-latest
     env:
-      SWR_ENDPOINT: swr.eu-de.otc.t-systems.com
+      TF_VAR_otc_access_key: ${{ secrets.OTC_ACCESS_KEY }}
+      TF_VAR_otc_secret_key: ${{ secrets.OTC_SECRET_KEY }}
+      TF_VAR_otc_domain_name: ${{ secrets.OTC_DOMAIN_NAME }}
+      TF_VAR_otc_project_name: ${{ vars.OTC_PROJECT_NAME }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.OTC_ACCESS_KEY }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.OTC_SECRET_KEY }}
+      SWR_ENDPOINT: ${{ needs.infra.outputs.swr_endpoint }}
     steps:
       - uses: actions/checkout@v7
 
       - name: Login to SWR
+        env:
+          AK: ${{ secrets.OTC_ACCESS_KEY }}
+          SK: ${{ secrets.OTC_SECRET_KEY }}
         run: |
-          LOGIN_KEY=$(printf "${{ secrets.OTC_ACCESS_KEY }}" | openssl dgst -binary -sha256 -hmac "${{ secrets.OTC_SECRET_KEY }}" | od -An -vtx1 | sed 's/[ \n]//g' | sed 'N;s/\n//')
-          echo "$LOGIN_KEY" | docker login ${{ env.SWR_ENDPOINT }} \
-            -u "${{ vars.OTC_PROJECT_NAME }}@${{ secrets.OTC_ACCESS_KEY }}" \
-            --password-stdin
+          LOGIN_KEY=$(printf '%s' "$AK" | openssl dgst -binary -sha256 -hmac "$SK" | od -An -vtx1 | tr -d ' \n')
+          echo "$LOGIN_KEY" | docker login "$SWR_ENDPOINT" -u "${TF_VAR_otc_project_name}@${AK}" --password-stdin
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
@@ -136,7 +176,7 @@ jobs:
       - name: Build + push demo-app
         uses: docker/build-push-action@v7
         with:
-          context: apps/demo-app
+          context: workloads/demo-app
           push: true
           tags: |
             ${{ env.SWR_ENDPOINT }}/${{ needs.infra.outputs.swr_org }}/demo-app:${{ github.sha }}
@@ -158,7 +198,7 @@ jobs:
         if: needs.infra.outputs.gpu_enabled == 'true'
         uses: docker/build-push-action@v7
         with:
-          context: apps/gpu-demo
+          context: workloads/gpu-demo
           push: true
           tags: |
             ${{ env.SWR_ENDPOINT }}/${{ needs.infra.outputs.swr_org }}/gpu-demo:${{ github.sha }}
@@ -166,16 +206,25 @@ jobs:
           build-args: APP_VERSION=${{ github.sha }}
           provenance: false
 
-  apps:
-    name: Apps
+  workloads:
+    name: Workloads
     needs: [infra, build-images]
     if: |
       !cancelled() &&
-      inputs.apply &&
       needs.infra.result == 'success' &&
-      (needs.build-images.result == 'success' ||
+      (!inputs.apply ||
+       needs.build-images.result == 'success' ||
        (needs.build-images.result == 'skipped' && !inputs.build_images))
+    environment: ${{ inputs.environment || 'dev' }}
     runs-on: ubuntu-latest
+    env:
+      # Environment-scoped secrets/vars resolve only in jobs that reference the environment.
+      TF_VAR_otc_access_key: ${{ secrets.OTC_ACCESS_KEY }}
+      TF_VAR_otc_secret_key: ${{ secrets.OTC_SECRET_KEY }}
+      TF_VAR_otc_domain_name: ${{ secrets.OTC_DOMAIN_NAME }}
+      TF_VAR_otc_project_name: ${{ vars.OTC_PROJECT_NAME }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.OTC_ACCESS_KEY }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.OTC_SECRET_KEY }}
     steps:
       - uses: actions/checkout@v7
 
@@ -185,12 +234,19 @@ jobs:
           tofu_wrapper: false
 
       - name: OpenTofu Init
-        working-directory: apps
-        run: tofu init -input=false
+        working-directory: workloads
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.OTC_ACCESS_KEY }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.OTC_SECRET_KEY }}
+        run: tofu init -input=false -backend-config="envs/${DEPLOY_ENV}.backend.tfvars"
 
       - name: Select image tags
-        working-directory: apps
+        working-directory: workloads
         env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.OTC_ACCESS_KEY }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.OTC_SECRET_KEY }}
+          TF_VAR_demo_app_image_tag: latest
+          TF_VAR_gpu_demo_image_tag: latest
           BUILT: ${{ needs.build-images.result == 'success' }}
           GPU_BUILT: ${{ needs.build-images.result == 'success' && needs.infra.outputs.gpu_enabled == 'true' }}
         run: |
@@ -204,31 +260,39 @@ jobs:
           } >> "$GITHUB_ENV"
 
       - name: OpenTofu Plan
-        working-directory: apps
+        working-directory: workloads
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.OTC_ACCESS_KEY }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.OTC_SECRET_KEY }}
         run: |
           set -o pipefail
-          tofu plan -input=false -no-color 2>&1 | tee plan-output.txt
+          tofu plan -var-file="envs/${DEPLOY_ENV}.tfvars" -input=false -no-color -out=tfplan 2>&1 | tee plan-output.txt
+
+      - name: OpenTofu Apply
+        if: inputs.apply
+        working-directory: workloads
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.OTC_ACCESS_KEY }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.OTC_SECRET_KEY }}
+        run: tofu apply -input=false tfplan
 
       - name: Plan Summary
-        if: ${{ always() && hashFiles('apps/plan-output.txt') != '' }}
-        working-directory: apps
+        if: ${{ always() && hashFiles('workloads/plan-output.txt') != '' }}
+        working-directory: workloads
         run: |
           {
-            echo "## Apps Plan"
+            echo "## Workloads Plan"
             echo '```'
             cat plan-output.txt
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: OpenTofu Apply
-        working-directory: apps
-        run: tofu apply -auto-approve -input=false
-
       - name: Summary
-        working-directory: apps
+        if: inputs.apply
+        working-directory: workloads
         run: |
           {
-            echo "## Apps Deployed"
+            echo "## Workloads Deployed"
             echo ""
             echo "| App | URL |"
             echo "|---|---|"

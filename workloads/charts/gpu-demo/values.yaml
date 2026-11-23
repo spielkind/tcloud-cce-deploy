@@ -1,0 +1,34 @@
+image: ""
+hostname: ""
+replicas: 1
+# One model per tab; loaded on first use, least recently used unloaded when VRAM is short.
+models:
+  image: "stabilityai/sdxl-turbo"
+  chat: "Qwen/Qwen2.5-3B-Instruct"
+  stt: "openai/whisper-large-v3-turbo"
+  vision: "florence-community/Florence-2-base"
+preload: "image"
+# Optional: Hugging Face token injected by the OpenBao agent (no token in values or state).
+openbao:
+  enabled: false
+  role: "gpu-demo"
+  secretPath: "kv/data/gpu-demo/hf"
+imageSize: 512
+storage:
+  size: 60Gi
+  storageClass: csi-disk-topology
+nodeSelector:
+  accelerator: nvidia
+tolerations:
+  - key: nvidia.com/gpu
+    operator: Exists
+    effect: NoSchedule
+resources:
+  requests:
+    cpu: "2"
+    memory: 12Gi
+    nvidia.com/gpu: 1
+  limits:
+    cpu: "6"
+    memory: 28Gi
+    nvidia.com/gpu: 1

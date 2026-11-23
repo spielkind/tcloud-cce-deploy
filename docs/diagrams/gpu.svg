@@ -1,0 +1,104 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 560" font-family="Inter, -apple-system, sans-serif">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1a1a2e"/>
+      <stop offset="100%" stop-color="#16213e"/>
+    </linearGradient>
+    <linearGradient id="card" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1e2a4a"/>
+      <stop offset="100%" stop-color="#1a2340"/>
+    </linearGradient>
+    <marker id="ab" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6" fill="#4a6fa5"/></marker>
+    <marker id="ag" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6" fill="#2ecc71"/></marker>
+    <marker id="al" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6" fill="#9acd32"/></marker>
+    <marker id="ay" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6" fill="#f39c12"/></marker>
+    <marker id="ac" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6" fill="#3498db"/></marker>
+  </defs>
+
+  <rect width="860" height="560" fill="url(#bg)" rx="12"/>
+  <text x="430" y="34" text-anchor="middle" fill="#fff" font-size="18" font-weight="700">GPU Node Pool + GPU AI Playground</text>
+  <text x="430" y="53" text-anchor="middle" fill="#889" font-size="10">node_pools entry with gpu = true · scale to zero · image · chat · speech · vision on one L4</text>
+
+  <!-- Browser -->
+  <rect x="40" y="80" width="150" height="46" rx="8" fill="url(#card)" stroke="#4a6fa5"/>
+  <text x="115" y="101" text-anchor="middle" fill="#e0e0e0" font-size="12" font-weight="600">Browser</text>
+  <text x="115" y="116" text-anchor="middle" fill="#889" font-size="9">https://&lt;hostname&gt;.&lt;zone&gt;</text>
+
+  <!-- GitHub / SWR -->
+  <rect x="660" y="80" width="160" height="46" rx="8" fill="url(#card)" stroke="#3498db"/>
+  <text x="740" y="101" text-anchor="middle" fill="#3498db" font-size="12" font-weight="600">SWR</text>
+  <text x="740" y="116" text-anchor="middle" fill="#889" font-size="9">gpu-demo:&lt;sha&gt; (built by CI)</text>
+
+  <!-- Cluster frame -->
+  <rect x="30" y="150" width="800" height="300" rx="12" fill="none" stroke="#3498db" stroke-dasharray="6 4"/>
+  <text x="135" y="172" fill="#3498db" font-size="12" font-weight="600">CCE Cluster</text>
+
+  <!-- nginx ingress -->
+  <rect x="40" y="190" width="150" height="46" rx="8" fill="url(#card)" stroke="#2ecc71"/>
+  <text x="115" y="211" text-anchor="middle" fill="#2ecc71" font-size="12" font-weight="600">nginx-ingress</text>
+  <text x="115" y="226" text-anchor="middle" fill="#889" font-size="9">TLS (cert-manager)</text>
+  <line x1="115" y1="126" x2="115" y2="188" stroke="#4a6fa5" stroke-width="1.5" marker-end="url(#ab)"/>
+
+  <!-- CPU pool -->
+  <rect x="40" y="270" width="150" height="160" rx="8" fill="url(#card)" stroke="#4a6fa5"/>
+  <text x="115" y="292" text-anchor="middle" fill="#e0e0e0" font-size="11" font-weight="600">CPU pool</text>
+  <text x="115" y="308" text-anchor="middle" fill="#889" font-size="9">node_pools.pool</text>
+  <text x="115" y="336" text-anchor="middle" fill="#aab" font-size="9">ingress · OpenBao</text>
+  <text x="115" y="350" text-anchor="middle" fill="#aab" font-size="9">demo-app · podinfo</text>
+  <text x="115" y="378" text-anchor="middle" fill="#889" font-size="9">no GPU taint →</text>
+  <text x="115" y="392" text-anchor="middle" fill="#889" font-size="9">GPU pods never land here</text>
+
+  <!-- GPU pool -->
+  <rect x="230" y="190" width="400" height="240" rx="10" fill="#1d2a12" stroke="#9acd32" stroke-dasharray="5 3"/>
+  <text x="248" y="212" fill="#9acd32" font-size="12" font-weight="600">GPU pool  &lt;prefix&gt;-gpu</text>
+  <text x="248" y="228" fill="#889" font-size="9">pi5e.2xlarge.4 · 1× NVIDIA L4 24 GB · autoscaled 0…1 · one AZ</text>
+  <text x="248" y="242" fill="#889" font-size="9">label accelerator=nvidia · taint nvidia.com/gpu=present:NoSchedule</text>
+
+  <!-- gpu-demo pod -->
+  <rect x="250" y="258" width="220" height="92" rx="8" fill="url(#card)" stroke="#9acd32"/>
+  <text x="360" y="276" text-anchor="middle" fill="#9acd32" font-size="12" font-weight="600">Pod gpu-demo · tabs</text>
+  <text x="360" y="292" text-anchor="middle" fill="#aab" font-size="9">text/image→image · chat · speech→text · vision</text>
+  <text x="360" y="306" text-anchor="middle" fill="#aab" font-size="9">model manager: lazy load · LRU unload · 1 GPU job</text>
+  <text x="360" y="320" text-anchor="middle" fill="#889" font-size="9">limit nvidia.com/gpu: 1 · nodeSelector + tolerations</text>
+  <text x="360" y="341" text-anchor="middle" fill="#f1c40f" font-size="9">openbao-agent → /vault/secrets/hf (HF token)</text>
+  <path d="M190,213 H220 V300 H248" fill="none" stroke="#2ecc71" stroke-width="1.5" marker-end="url(#ag)"/>
+
+  <!-- model PVC -->
+  <rect x="490" y="258" width="125" height="92" rx="8" fill="url(#card)" stroke="#e67e22"/>
+  <text x="552" y="282" text-anchor="middle" fill="#e67e22" font-size="11" font-weight="600">PVC models</text>
+  <text x="552" y="299" text-anchor="middle" fill="#aab" font-size="9">EVS csi-disk-topology</text>
+  <text x="552" y="314" text-anchor="middle" fill="#889" font-size="9">model cache 60 Gi</text>
+  <text x="552" y="329" text-anchor="middle" fill="#889" font-size="9">survives scale to zero</text>
+  <line x1="470" y1="304" x2="488" y2="304" stroke="#e67e22" stroke-width="1.5"/>
+
+  <!-- AI suite -->
+  <rect x="250" y="364" width="365" height="52" rx="8" fill="url(#card)" stroke="#9acd32"/>
+  <text x="432" y="386" text-anchor="middle" fill="#e0e0e0" font-size="11" font-weight="600">CCE AI Suite (NVIDIA GPU) addon</text>
+  <text x="432" y="403" text-anchor="middle" fill="#889" font-size="9">NVIDIA driver + device plugin · installed automatically when a pool has gpu = true</text>
+
+  <!-- autoscaler -->
+  <rect x="660" y="190" width="160" height="110" rx="8" fill="url(#card)" stroke="#f39c12"/>
+  <text x="740" y="212" text-anchor="middle" fill="#f39c12" font-size="12" font-weight="600">Cluster autoscaler</text>
+  <text x="740" y="232" text-anchor="middle" fill="#aab" font-size="9">GPU pod pending</text>
+  <text x="740" y="246" text-anchor="middle" fill="#aab" font-size="9">→ add GPU node</text>
+  <text x="740" y="266" text-anchor="middle" fill="#aab" font-size="9">no GPU pod for ~10 min</text>
+  <text x="740" y="280" text-anchor="middle" fill="#aab" font-size="9">→ remove GPU node</text>
+  <path d="M660,245 H632" fill="none" stroke="#f39c12" stroke-width="1.5" marker-end="url(#ay)"/>
+
+  <!-- image pull -->
+  <path d="M740,126 V168 H645 V250 H420 V256" fill="none" stroke="#3498db" stroke-width="1.5" stroke-dasharray="5 3" marker-end="url(#ac)"/>
+  <text x="652" y="163" fill="#3498db" font-size="8" font-style="italic">image pull</text>
+
+  <!-- HuggingFace -->
+  <rect x="660" y="330" width="160" height="46" rx="8" fill="url(#card)" stroke="#8e44ad"/>
+  <text x="740" y="351" text-anchor="middle" fill="#bb8fce" font-size="11" font-weight="600">Hugging Face Hub</text>
+  <text x="740" y="366" text-anchor="middle" fill="#889" font-size="9">models (~17 GB, first use)</text>
+  <path d="M658,353 H617" fill="none" stroke="#8e44ad" stroke-width="1.5" stroke-dasharray="3 3"/>
+  <text x="620" y="368" fill="#bb8fce" font-size="8">via NAT</text>
+
+  <!-- scale to zero strip -->
+  <rect x="30" y="468" width="800" height="72" rx="10" fill="#141c33" stroke="#2a3550"/>
+  <text x="48" y="490" fill="#e0e0e0" font-size="12" font-weight="600">Scale to zero</text>
+  <text x="48" y="510" fill="#aab" font-size="10">gpu_demo_replicas = 1 → pod pending → autoscaler starts a GPU node → driver ready → model loads → /readyz OK</text>
+  <text x="48" y="528" fill="#aab" font-size="10">gpu_demo_replicas = 0 (or kubectl scale --replicas=0) → node empty → removed after ~10 min → no GPU cost</text>
+</svg>

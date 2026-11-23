@@ -1,0 +1,374 @@
+#!/bin/bash
+set -euo pipefail
+
+# =============================================================================
+# Install prerequisites
+# =============================================================================
+if command -v apt-get &>/dev/null; then
+  apt-get update -qq && apt-get install -y -qq curl e2fsprogs jq
+elif command -v yum &>/dev/null; then
+  yum install -y curl jq
+fi
+
+# =============================================================================
+# Shared helpers for scripts on this node
+# =============================================================================
+mkdir -p /usr/local/lib/openbao
+
+# Temporary AK/SK of the ECS agency from the metadata service (source it).
+cat > /usr/local/lib/openbao/agency-creds.sh <<'CREDSEOF'
+CREDS=$(curl -sf http://169.254.169.254/openstack/latest/securitykey)
+AWS_ACCESS_KEY_ID=$(jq -r '.credential.access' <<< "$CREDS")
+AWS_SECRET_ACCESS_KEY=$(jq -r '.credential.secret' <<< "$CREDS")
+AWS_SESSION_TOKEN=$(jq -r '.credential.securitytoken' <<< "$CREDS")
+export AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
+unset CREDS
+CREDSEOF
+
+# TLS settings: the server certificate is issued for the FQDN, so connections to
+# node IPs verify it via BAO_TLS_SERVER_NAME / curl --connect-to instead of
+# skipping verification. Let's Encrypt chains are verified with the system CAs.
+cat > /usr/local/lib/openbao/tls.sh <<'TLSLIBEOF'
+BAO_FQDN="${fqdn}"
+export BAO_TLS_SERVER_NAME="$BAO_FQDN"
+CURL_TLS=()
+%{ if !enable_letsencrypt ~}
+export BAO_CACERT="/etc/openbao/tls/ca.pem"
+CURL_TLS=(--cacert "$BAO_CACERT")
+%{ endif ~}
+
+# node_curl <ip> <path> [curl args...]
+node_curl() {
+  local ip=$1 path=$2
+  shift 2
+  curl -s "$${CURL_TLS[@]}" --connect-to "$BAO_FQDN:8200:$ip:8200" "$@" "https://$BAO_FQDN:8200$path"
+}
+TLSLIBEOF
+
+# =============================================================================
+# Download and install OpenBao v${openbao_version}
+# =============================================================================
+curl -fsSL "https://github.com/openbao/openbao/releases/download/v${openbao_version}/openbao_${openbao_version}_linux_amd64.deb" \
+  -o /tmp/openbao.deb
+dpkg -i /tmp/openbao.deb
+rm -f /tmp/openbao.deb
+
+# =============================================================================
+# Create user and directories
+# =============================================================================
+useradd --system --home /opt/openbao --shell /bin/false openbao 2>/dev/null || true
+mkdir -p /opt/openbao/data /etc/openbao/tls
+
+# =============================================================================
+# Write TLS certificates (BYO)
+# =============================================================================
+cat > /etc/openbao/tls/ca.pem <<'TLSCA'
+${tls_ca_cert}
+TLSCA
+
+cat > /etc/openbao/tls/server.pem <<'TLSCERT'
+${tls_server_cert}
+TLSCERT
+
+cat > /etc/openbao/tls/server-key.pem <<'TLSKEY'
+${tls_server_key}
+TLSKEY
+
+chmod 600 /etc/openbao/tls/server-key.pem
+chown -R openbao:openbao /etc/openbao
+
+%{ if enable_letsencrypt ~}
+# =============================================================================
+# Let's Encrypt certificate from OBS (issued and renewed by the bastion host)
+# =============================================================================
+apt-get install -y -qq awscli
+
+cat > /usr/local/bin/openbao-cert-refresh.sh <<'CERTEOF'
+#!/bin/bash
+# Installs the current certificate from OBS and reloads OpenBao when it changed.
+# Exits non-zero when no certificate is available yet.
+set -euo pipefail
+
+OBS_BUCKET="${obs_bucket}"
+OBS_REGION="${obs_region}"
+OBS_PREFIX="certs/${letsencrypt_domain}"
+OBS_ENDPOINT="https://obs.$${OBS_REGION}.otc.t-systems.com"
+TLS_DIR="/etc/openbao/tls"
+
+# shellcheck source=/dev/null
+source /usr/local/lib/openbao/agency-creds.sh
+
+WORK_DIR=$(mktemp -d)
+trap 'rm -rf "$${WORK_DIR}"' EXIT
+
+for FILE in fullchain.pem privkey.pem chain.pem; do
+  aws s3 cp "s3://$${OBS_BUCKET}/$${OBS_PREFIX}/$${FILE}" "$${WORK_DIR}/$${FILE}" \
+    --endpoint-url "$${OBS_ENDPOINT}" --region "$${OBS_REGION}" --quiet 2>/dev/null
+done
+
+if cmp -s "$${WORK_DIR}/fullchain.pem" "$${TLS_DIR}/server.pem"; then
+  exit 0
+fi
+
+install -m 644 -o openbao -g openbao "$${WORK_DIR}/fullchain.pem" "$${TLS_DIR}/server.pem"
+install -m 600 -o openbao -g openbao "$${WORK_DIR}/privkey.pem" "$${TLS_DIR}/server-key.pem"
+install -m 644 -o openbao -g openbao "$${WORK_DIR}/chain.pem" "$${TLS_DIR}/ca.pem"
+echo "Let's Encrypt certificate installed from s3://$${OBS_BUCKET}/$${OBS_PREFIX}/"
+
+# OpenBao reloads listener certificates on SIGHUP.
+if systemctl is-active -q openbao; then
+  systemctl reload openbao
+fi
+CERTEOF
+chmod 700 /usr/local/bin/openbao-cert-refresh.sh
+
+echo "=== Waiting for Let's Encrypt certificates in OBS ==="
+MAX_ATTEMPTS=120  # 120 * 15s = 30min
+for i in $(seq 1 $${MAX_ATTEMPTS}); do
+  if /usr/local/bin/openbao-cert-refresh.sh; then
+    break
+  fi
+  echo "  [$${i}/$${MAX_ATTEMPTS}] Certificates not yet available, retrying in 15s..."
+  sleep 15
+done
+
+# Pick up certificates renewed by the bastion (Let's Encrypt certs live 90 days).
+cat > /etc/cron.d/openbao-cert-refresh <<'CRONEOF'
+41 4 * * * root /usr/local/bin/openbao-cert-refresh.sh 2>&1 | logger -t openbao-cert
+CRONEOF
+chmod 644 /etc/cron.d/openbao-cert-refresh
+%{ endif ~}
+
+# =============================================================================
+# Format and mount EVS data volume (Raft storage)
+# =============================================================================
+for _ in $(seq 1 300); do
+  [ -b ${data_device} ] && break
+  sleep 1
+done
+[ -b ${data_device} ] || { echo "ERROR: ${data_device} not found after 5 minutes"; exit 1; }
+
+# Format only if no existing filesystem (preserve Raft data on ECS recreation).
+if ! blkid ${data_device} >/dev/null 2>&1; then
+  mkfs.ext4 ${data_device}
+fi
+UUID=$(blkid -s UUID -o value ${data_device})
+grep -q "UUID=$${UUID} /opt/openbao/data" /etc/fstab || echo "UUID=$${UUID} /opt/openbao/data ext4 defaults,nofail 0 2" >> /etc/fstab
+mount /opt/openbao/data
+chown -R openbao:openbao /opt/openbao
+
+# =============================================================================
+# Write OpenBao configuration
+# =============================================================================
+cat > /etc/openbao/config.hcl <<'BAOEOF'
+ui = true
+
+listener "tcp" {
+  address         = "0.0.0.0:8200"
+  cluster_address = "0.0.0.0:8201"
+  tls_cert_file   = "/etc/openbao/tls/server.pem"
+  tls_key_file    = "/etc/openbao/tls/server-key.pem"
+}
+
+storage "raft" {
+  path    = "/opt/openbao/data"
+  node_id = "${node_id}"
+%{ for peer_ip in peer_ips ~}
+  retry_join {
+    leader_api_addr         = "https://${peer_ip}:8200"
+    leader_ca_cert_file     = "/etc/openbao/tls/ca.pem"
+    leader_tls_servername   = "${fqdn}"
+  }
+%{ endfor ~}
+}
+
+api_addr     = "https://${node_ip}:8200"
+cluster_addr = "https://${node_ip}:8201"
+
+audit "file" "default" {
+  options = {
+    file_path = "/var/log/openbao/audit.log"
+  }
+}
+BAOEOF
+
+chown -R openbao:openbao /etc/openbao
+
+# =============================================================================
+# Environment defaults for all users (bao CLI)
+# =============================================================================
+cat > /etc/profile.d/openbao.sh <<'PROFILEEOF'
+export BAO_ADDR="https://127.0.0.1:8200"
+export BAO_TLS_SERVER_NAME="${fqdn}"
+%{ if !enable_letsencrypt ~}
+export BAO_CACERT="/etc/openbao/tls/ca.pem"
+%{ endif ~}
+PROFILEEOF
+
+# =============================================================================
+# Systemd service
+# =============================================================================
+cat > /etc/systemd/system/openbao.service <<'SVCEOF'
+[Unit]
+Description=OpenBao Secret Management
+Documentation=https://openbao.org/docs/
+Requires=network-online.target
+After=network-online.target
+
+[Service]
+User=openbao
+Group=openbao
+ExecStart=/usr/bin/bao server -config=/etc/openbao/config.hcl
+ExecReload=/bin/kill -HUP $MAINPID
+KillSignal=SIGTERM
+Restart=on-failure
+RestartSec=5
+LimitNOFILE=65536
+LimitMEMLOCK=infinity
+AmbientCapabilities=CAP_IPC_LOCK
+
+[Install]
+WantedBy=multi-user.target
+SVCEOF
+
+mkdir -p /var/log/openbao
+chown openbao:openbao /var/log/openbao
+
+cat > /etc/logrotate.d/openbao-audit <<'LREOF'
+/var/log/openbao/audit.log {
+    daily
+    rotate 7
+    compress
+    delaycompress
+    missingok
+    notifempty
+    copytruncate
+}
+LREOF
+
+systemctl daemon-reload
+systemctl enable openbao
+systemctl start openbao
+
+%{ if enable_lts_logging ~}
+# LTS ICAgent
+mkdir -p /opt/cloud/lts
+chmod 750 /opt/cloud/lts
+echo "${name_prefix}-openbao-node" > /opt/cloud/lts/custom_tag
+chmod 640 /opt/cloud/lts/custom_tag
+
+cd /tmp
+curl -fsSL "https://icagent-${lts_region}.obs.${lts_region}.otc.t-systems.com/ICAgent_linux/apm_agent_install.sh" -o apm_agent_install.sh
+REGION=${lts_region} bash apm_agent_install.sh -accessip lts-access.${lts_region}.otc.t-systems.com -obsdomain obs.${lts_region}.otc.t-systems.com || echo "WARNING: ICAgent install failed"
+rm -f apm_agent_install.sh
+%{ endif ~}
+
+%{ if enable_auto_unseal ~}
+# =============================================================================
+# Auto-Unseal via OTC DEW KMS + OBS (agency-based auth via metadata service)
+# =============================================================================
+apt-get install -y -qq awscli
+
+# Auto-unseal config (no credentials — agency provides them via metadata)
+cat > /etc/openbao/auto-unseal.env <<'AUEOF'
+KMS_REGION=${kms_region}
+KMS_KEY_ID=${kms_key_id}
+OBS_BUCKET=${obs_bucket}
+OBS_KEY=unseal-keys/encrypted.json
+AUEOF
+chmod 600 /etc/openbao/auto-unseal.env
+
+# --- Helper: KMS encrypt/decrypt via AKSK signing (no IAM token needed) ---
+# shellcheck source=/dev/null
+source /usr/local/lib/openbao/agency-creds.sh
+
+aws s3 cp "s3://${obs_bucket}/scripts/openbao-kms.py" /usr/local/bin/openbao-kms.py \
+  --endpoint-url "https://obs.${obs_region}.otc.t-systems.com" --region "${obs_region}"
+chmod 700 /usr/local/bin/openbao-kms.py
+
+# --- Auto-unseal: fetch from OBS -> decrypt via KMS -> unseal ---
+cat > /usr/local/bin/openbao-auto-unseal.sh <<'UNSEALEOF'
+#!/bin/bash
+set -euo pipefail
+
+# shellcheck source=/dev/null
+source /etc/openbao/auto-unseal.env
+# shellcheck source=/dev/null
+source /usr/local/lib/openbao/tls.sh
+
+export BAO_ADDR="https://127.0.0.1:8200"
+
+# Wait for OpenBao to respond (max 2 min)
+for _ in $(seq 1 60); do
+  node_curl 127.0.0.1 /v1/sys/seal-status -o /dev/null && break
+  sleep 2
+done
+
+SEAL_STATUS=$(node_curl 127.0.0.1 /v1/sys/seal-status)
+SEALED=$(jq -r '.sealed' <<< "$SEAL_STATUS")
+INITIALIZED=$(jq -r '.initialized' <<< "$SEAL_STATUS")
+
+if [ "$INITIALIZED" != "true" ]; then
+  echo "OpenBao is not initialized — run init on bastion first"
+  exit 0
+fi
+
+if [ "$SEALED" != "true" ]; then
+  echo "OpenBao is already unsealed"
+  exit 0
+fi
+
+# Fetch encrypted keys from OBS via agency credentials
+# shellcheck source=/dev/null
+source /usr/local/lib/openbao/agency-creds.sh
+
+KEYS_FILE=$(mktemp)
+trap 'rm -f "$KEYS_FILE"' EXIT
+
+aws s3 cp "s3://$${OBS_BUCKET}/$${OBS_KEY}" "$KEYS_FILE" \
+  --endpoint-url "https://obs.$${KMS_REGION}.otc.t-systems.com" \
+  --region "$${KMS_REGION}" 2>/dev/null || {
+  echo "No encrypted unseal keys in OBS yet — run init on bastion first"
+  exit 0
+}
+
+# Decrypt each key and unseal
+KEY_COUNT=$(jq '.keys | length' "$KEYS_FILE")
+for i in $(seq 0 $((KEY_COUNT - 1))); do
+  CIPHER=$(jq -r ".keys[$i]" "$KEYS_FILE")
+  PLAIN_B64=$(/usr/local/bin/openbao-kms.py decrypt "" "$CIPHER")
+  UNSEAL_KEY=$(echo "$PLAIN_B64" | base64 -d)
+  bao operator unseal "$UNSEAL_KEY" >/dev/null 2>&1 || true
+
+  SEALED=$(node_curl 127.0.0.1 /v1/sys/seal-status | jq -r '.sealed')
+  if [ "$SEALED" != "true" ]; then
+    echo "OpenBao unsealed after $((i + 1)) key(s)"
+    exit 0
+  fi
+done
+
+echo "WARNING: unseal incomplete — not enough keys in OBS"
+exit 1
+UNSEALEOF
+chmod 700 /usr/local/bin/openbao-auto-unseal.sh
+
+# --- Systemd service for auto-unseal on boot ---
+cat > /etc/systemd/system/openbao-unseal.service <<'AUSVEOF'
+[Unit]
+Description=OpenBao Auto-Unseal via OTC KMS
+After=openbao.service
+Requires=openbao.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/openbao-auto-unseal.sh
+RemainAfterExit=true
+
+[Install]
+WantedBy=multi-user.target
+AUSVEOF
+
+systemctl daemon-reload
+systemctl enable openbao-unseal
+systemctl start openbao-unseal
+%{ endif ~}

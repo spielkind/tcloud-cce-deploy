@@ -1,10 +1,23 @@
-# OpenBao on CCE
+# OpenBao on CCE (`openbao_mode = "cce"`)
 
-OpenBao deployed as a HA cluster with Raft storage on OTC CCE.
+OpenBao deployed by `workloads/openbao.tf` as an HA cluster with Raft storage inside the CCE cluster (default in dev). For the dedicated-VM variant see [OpenBao on VMs](openbao-vm.md); the mode comparison is in the [README](../README.md#openbao-modes).
+
+## Contents
+
+- [Architecture](#architecture)
+- [What You Get](#what-you-get)
+- [Deploy](#deploy)
+- [Initial Setup (one-time, ~10 minutes)](#initial-setup-one-time-10-minutes)
+- [Audit Log](#audit-log)
+- [After Pod Restarts](#after-pod-restarts)
+- [Using the Injector](#using-the-injector)
+- [Backup & Recovery](#backup--recovery)
+- [Emergency: Generate New Root Token](#emergency-generate-new-root-token)
+- [Variables](#variables)
 
 ## Architecture
 
-![OpenBao Architecture](openbao.svg)
+![OpenBao Architecture](diagrams/openbao.svg)
 
 ## What You Get
 
@@ -22,9 +35,15 @@ Helm release, namespace and ServiceAccount are all named `openbao`.
 
 ## Deploy
 
+1. `infra/envs/<env>.tfvars`: `openbao_mode = "cce"` (optional: `create_openbao_unseal = true`, `create_workload_identity = true` for [auto-unseal](openbao-unseal.md); workload identity needs `bind_api_eip = true`).
+2. `workloads/envs/<env>.tfvars`: `create_openbao = true`. Workloads read the mode from the infra state (output `openbao_mode`); with any other mode no server is deployed.
+3. Run **Actions → Deploy** (Apply) or locally:
+
 ```bash
-cd apps
-tofu apply
+tofu -chdir=infra init -reconfigure -backend-config=envs/dev.backend.tfvars
+tofu -chdir=infra apply -var-file=envs/dev.tfvars
+tofu -chdir=workloads init -reconfigure -backend-config=envs/dev.backend.tfvars
+tofu -chdir=workloads apply -var-file=envs/dev.tfvars
 ```
 
 After apply, all OpenBao pods will be `Running` but `0/1 Ready` — this is normal.
@@ -74,7 +93,7 @@ kubectl exec -n openbao openbao-0 -c openbao -- bao operator unseal <key-3>
 ./scripts/openbao-init.sh
 ```
 
-Does everything automatically: init → unseal → raft join → configure KV v2 + auth → create admin user → revoke root → optionally upload unseal keys to OBS.
+Does everything automatically: init → unseal → raft join → configure KV v2 + userpass + Kubernetes auth → create admin user → revoke root → optionally upload unseal keys to OBS (`scripts/upload-unseal-keys.py`). It only works in cce mode and exits if infra reports another `openbao_mode`.
 The script uses `KUBECONFIG` only if it points to a non-empty file with a current context; otherwise (unset, missing or stale file) it reads the kubeconfig from the infra state (`infra/` must be initialized locally). It checks API connectivity first and prints the cluster endpoint. The StatefulSet uses `OrderedReady`, so `openbao-1`/`openbao-2` only start once the previous pod is unsealed; the script waits for each peer (up to 10 minutes) before joining it. Keys are saved immediately after initialization to a new `openbao.keys.XXXXXX` file (gitignored), without overwriting existing files. Copy them to your password manager, then delete the file. The admin password is not saved to disk.
 
 ### Step 3: Join + unseal Raft peers (Options A/B)
@@ -133,6 +152,29 @@ EOF
 ### Step 5: Verify
 
 Open `https://openbao.<zone>` → Login with **Username** method → your user + password.
+
+---
+
+## Audit Log
+
+With `openbao_audit_enabled = true` (default) the server config contains a declarative
+audit device (OpenBao 2.x):
+
+```hcl
+audit "file" "stdout" {
+  options = { file_path = "stdout" }
+}
+```
+
+Every request/response is written as JSON to the container stdout and shipped by the
+log-agent to the LTS stream `stdout-<cluster-id>` (filter on container `openbao`).
+Secret values appear only as HMAC hashes. The StatefulSet uses `OnDelete`, so a changed
+config is applied by restarting the pods one at a time (followers first):
+
+```bash
+kubectl -n openbao delete pod openbao-2   # wait until Running + unsealed, then openbao-1, openbao-0
+kubectl -n openbao exec openbao-0 -c openbao -- bao audit list   # needs a token
+```
 
 ---
 
@@ -233,12 +275,22 @@ bao token revoke -self
 
 ## Variables
 
+Infra (`infra/envs/<env>.tfvars`):
+
 | Variable | Default | Description |
 |---|---|---|
-| `create_openbao` | `false` | Deploy OpenBao |
+| `openbao_mode` | `cce` | Must be `cce` for this page |
+| `create_openbao_unseal` | `false` | KMS + OBS + FunctionGraph auto-unseal |
+| `create_workload_identity` | `false` | OIDC identity provider for the unseal init container (needs `bind_api_eip`) |
+
+Workloads (`workloads/envs/<env>.tfvars`):
+
+| Variable | Default | Description |
+|---|---|---|
+| `create_openbao` | `false` | Deploy OpenBao (server + injector in cce mode) |
 | `openbao_chart_version` | `0.30.8` | Helm chart version (OpenBao v2.7.3) |
 | `openbao_replicas` | `3` | Server replicas (odd for quorum) |
 | `openbao_hostname` | `openbao` | Subdomain (`openbao.<zone>`) |
 | `openbao_storage_size` | `10Gi` | PVC size per replica |
 
-Output: `openbao_url`.
+Workloads outputs: `openbao_mode`, `openbao_url` (`https://openbao.<zone>`).

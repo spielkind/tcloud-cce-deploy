@@ -14,6 +14,10 @@ terraform {
       source  = "hashicorp/random"
       version = "~> 3.9"
     }
+    tls = {
+      source  = "hashicorp/tls"
+      version = "~> 4.1"
+    }
   }
 }
 
@@ -26,3 +30,14 @@ provider "opentelekomcloud" {
   region      = var.region
 }
 
+# Regional service resources (for example OBS encryption keys) are scoped to
+# the region name rather than the project name.
+provider "opentelekomcloud" {
+  alias       = "regional"
+  access_key  = var.otc_access_key
+  secret_key  = var.otc_secret_key
+  domain_name = var.otc_domain_name
+  tenant_name = var.region
+  auth_url    = "https://iam.${var.region}.otc.t-systems.com/v3"
+  region      = var.region
+}

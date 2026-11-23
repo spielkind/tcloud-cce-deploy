@@ -16,7 +16,7 @@ import sys
 import tempfile
 from urllib.request import Request, urlopen
 
-REGION = "eu-de"
+REGION = os.environ.get("OTC_REGION", "eu-de")
 OBS_ENDPOINT = f"https://obs.{REGION}.otc.t-systems.com"
 OBJECT_KEY = "openbao-unseal/keys.enc"
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))

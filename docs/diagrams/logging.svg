@@ -1,0 +1,127 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 620" font-family="Inter, -apple-system, sans-serif">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1a1a2e"/>
+      <stop offset="100%" stop-color="#16213e"/>
+    </linearGradient>
+    <linearGradient id="card" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1e2a4a"/>
+      <stop offset="100%" stop-color="#1a2340"/>
+    </linearGradient>
+    <marker id="ar" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6" fill="#e74c3c"/></marker>
+    <marker id="ap" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6" fill="#9b59b6"/></marker>
+    <marker id="ao" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6" fill="#f39c12"/></marker>
+    <marker id="ab" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6" fill="#3498db"/></marker>
+  </defs>
+
+  <rect width="920" height="620" fill="url(#bg)" rx="12"/>
+  <text x="460" y="34" text-anchor="middle" fill="#fff" font-size="18" font-weight="700">Logging and Audit</text>
+  <text x="460" y="53" text-anchor="middle" fill="#889" font-size="10">CCE log-agent (LogConfig CRDs) → LTS · OpenBao audit · CTS · optional VPC flow logs</text>
+
+  <!-- Cluster -->
+  <rect x="25" y="72" width="480" height="380" rx="12" fill="none" stroke="#3498db" stroke-dasharray="6 4"/>
+  <text x="43" y="94" fill="#3498db" font-size="12" font-weight="600">CCE Cluster</text>
+
+  <!-- Sources -->
+  <rect x="40" y="108" width="190" height="56" rx="8" fill="url(#card)" stroke="#4a6fa5"/>
+  <text x="135" y="130" text-anchor="middle" fill="#e0e0e0" font-size="11" font-weight="600">Pods (stdout / stderr)</text>
+  <text x="135" y="146" text-anchor="middle" fill="#889" font-size="9">apps · nginx-ingress access logs</text>
+  <text x="135" y="158" text-anchor="middle" fill="#889" font-size="9">OpenBao audit (audit "file" stdout)</text>
+
+  <rect x="40" y="176" width="190" height="44" rx="8" fill="url(#card)" stroke="#4a6fa5"/>
+  <text x="135" y="196" text-anchor="middle" fill="#e0e0e0" font-size="11" font-weight="600">Log files in containers</text>
+  <text x="135" y="211" text-anchor="middle" fill="#889" font-size="9">container_file LogConfig (none yet)</text>
+
+  <rect x="40" y="232" width="190" height="56" rx="8" fill="url(#card)" stroke="#4a6fa5"/>
+  <text x="135" y="252" text-anchor="middle" fill="#e0e0e0" font-size="11" font-weight="600">Node log files</text>
+  <text x="135" y="267" text-anchor="middle" fill="#889" font-size="9">/var/log/messages · /var/log/secure</text>
+  <text x="135" y="280" text-anchor="middle" fill="#889" font-size="9">/var/paas/sys/log/kubernetes/*.log</text>
+
+  <rect x="40" y="300" width="190" height="44" rx="8" fill="url(#card)" stroke="#4a6fa5"/>
+  <text x="135" y="320" text-anchor="middle" fill="#e0e0e0" font-size="11" font-weight="600">Kubernetes events</text>
+  <text x="135" y="335" text-anchor="middle" fill="#889" font-size="9">warning + selected normal events</text>
+
+  <!-- log-agent -->
+  <rect x="275" y="108" width="210" height="236" rx="10" fill="#2a1d0a" stroke="#f39c12"/>
+  <text x="380" y="132" text-anchor="middle" fill="#f39c12" font-size="13" font-weight="700">log-agent addon</text>
+  <text x="380" y="150" text-anchor="middle" fill="#aab" font-size="9">namespace monitoring</text>
+  <rect x="292" y="162" width="176" height="34" rx="6" fill="url(#card)" stroke="#f39c12" stroke-opacity=".6"/>
+  <text x="380" y="183" text-anchor="middle" fill="#e0e0e0" font-size="10">fluent-bit DaemonSet (per node)</text>
+  <rect x="292" y="204" width="176" height="34" rx="6" fill="url(#card)" stroke="#f39c12" stroke-opacity=".6"/>
+  <text x="380" y="225" text-anchor="middle" fill="#e0e0e0" font-size="10">log-operator (LogConfig CRDs)</text>
+  <rect x="292" y="246" width="176" height="34" rx="6" fill="url(#card)" stroke="#f39c12" stroke-opacity=".6"/>
+  <text x="380" y="267" text-anchor="middle" fill="#e0e0e0" font-size="10">OTel collector (events)</text>
+  <text x="380" y="300" text-anchor="middle" fill="#889" font-size="9">LogConfigs: default-stdout, default-event,</text>
+  <text x="380" y="313" text-anchor="middle" fill="#889" font-size="9">default-event-aom (addon) ·</text>
+  <text x="380" y="326" text-anchor="middle" fill="#889" font-size="9">node-* (workloads/logging.tf)</text>
+
+  <line x1="230" y1="136" x2="273" y2="136" stroke="#f39c12" stroke-width="1.5" marker-end="url(#ao)"/>
+  <line x1="230" y1="198" x2="273" y2="198" stroke="#f39c12" stroke-width="1.5" stroke-dasharray="4 3" marker-end="url(#ao)"/>
+  <line x1="230" y1="260" x2="273" y2="260" stroke="#f39c12" stroke-width="1.5" marker-end="url(#ao)"/>
+  <line x1="230" y1="322" x2="273" y2="322" stroke="#f39c12" stroke-width="1.5" marker-end="url(#ao)"/>
+
+  <!-- VPC flow -->
+  <rect x="40" y="370" width="445" height="62" rx="8" fill="url(#card)" stroke="#4a6fa5" stroke-dasharray="5 3"/>
+  <text x="58" y="392" fill="#e0e0e0" font-size="11" font-weight="600">VPC flow log (optional, vpc_flow_log_enabled)</text>
+  <text x="58" y="409" fill="#889" font-size="9">cluster VPC · traffic all | accept | reject (default reject)</text>
+  <text x="58" y="423" fill="#889" font-size="9">written by the VPC service, no agent</text>
+
+  <!-- LTS -->
+  <rect x="560" y="72" width="335" height="262" rx="12" fill="#2a1414" stroke="#e74c3c"/>
+  <text x="578" y="96" fill="#e74c3c" font-size="13" font-weight="700">LTS group k8s-log-&lt;cluster-id&gt;</text>
+  <text x="578" y="112" fill="#889" font-size="9">retention lts_ttl_days (streams inherit) · CCE console: Logging</text>
+  <rect x="578" y="124" width="300" height="30" rx="6" fill="url(#card)" stroke="#e74c3c" stroke-opacity=".7"/>
+  <text x="590" y="143" fill="#e0e0e0" font-size="10">stdout-&lt;id&gt;  ·  Container standard output</text>
+  <rect x="578" y="160" width="300" height="30" rx="6" fill="url(#card)" stroke="#e74c3c" stroke-opacity=".7"/>
+  <text x="590" y="179" fill="#e0e0e0" font-size="10">containerfile-&lt;id&gt;  ·  Container logs</text>
+  <rect x="578" y="196" width="300" height="30" rx="6" fill="url(#card)" stroke="#e74c3c" stroke-opacity=".7"/>
+  <text x="590" y="215" fill="#e0e0e0" font-size="10">hostfile-&lt;id&gt;  ·  Node Files</text>
+  <rect x="578" y="232" width="300" height="30" rx="6" fill="url(#card)" stroke="#e74c3c" stroke-opacity=".7"/>
+  <text x="590" y="251" fill="#e0e0e0" font-size="10">event-&lt;id&gt;  ·  Kubernetes Events</text>
+  <rect x="578" y="268" width="300" height="30" rx="6" fill="url(#card)" stroke="#e74c3c" stroke-opacity=".7" stroke-dasharray="4 3"/>
+  <text x="590" y="287" fill="#e0e0e0" font-size="10">vpc-flow-&lt;prefix&gt;  ·  optional</text>
+  <text x="578" y="320" fill="#889" font-size="9">+ CTS traces (cts_lts_enabled)</text>
+
+  <path d="M485,226 H520 V226 H558" fill="none" stroke="#e74c3c" stroke-width="2" marker-end="url(#ar)"/>
+  <text x="508" y="218" fill="#e74c3c" font-size="9" font-style="italic">ship</text>
+  <path d="M485,401 H525 V283 H576" fill="none" stroke="#e74c3c" stroke-width="1.5" stroke-dasharray="5 3" marker-end="url(#ar)"/>
+
+  <!-- AOM -->
+  <rect x="560" y="350" width="150" height="46" rx="8" fill="url(#card)" stroke="#9b59b6"/>
+  <text x="635" y="371" text-anchor="middle" fill="#bb8fce" font-size="11" font-weight="600">AOM</text>
+  <text x="635" y="386" text-anchor="middle" fill="#889" font-size="9">events (default-event-aom)</text>
+  <path d="M485,330 H537 V373 H558" fill="none" stroke="#9b59b6" stroke-width="1.5" marker-end="url(#ap)"/>
+
+  <!-- CTS -->
+  <rect x="25" y="472" width="420" height="128" rx="12" fill="none" stroke="#3498db" stroke-dasharray="6 4"/>
+  <text x="43" y="494" fill="#3498db" font-size="12" font-weight="600">Cloud API audit</text>
+  <rect x="40" y="506" width="180" height="80" rx="8" fill="url(#card)" stroke="#3498db"/>
+  <text x="130" y="528" text-anchor="middle" fill="#3498db" font-size="11" font-weight="600">CTS system tracker</text>
+  <text x="130" y="545" text-anchor="middle" fill="#aab" font-size="9">every OTC API call</text>
+  <text x="130" y="559" text-anchor="middle" fill="#889" font-size="9">create_cts_tracker</text>
+  <text x="130" y="573" text-anchor="middle" fill="#889" font-size="9">one per project</text>
+  <rect x="250" y="506" width="180" height="80" rx="8" fill="url(#card)" stroke="#3498db"/>
+  <text x="340" y="528" text-anchor="middle" fill="#3498db" font-size="11" font-weight="600">OBS audit bucket</text>
+  <text x="340" y="545" text-anchor="middle" fill="#aab" font-size="9">&lt;prefix&gt;-audit-&lt;hex&gt;</text>
+  <text x="340" y="559" text-anchor="middle" fill="#889" font-size="9">SSE-KMS · gzip</text>
+  <text x="340" y="573" text-anchor="middle" fill="#889" font-size="9">expiry cts_retention_days</text>
+  <line x1="220" y1="546" x2="248" y2="546" stroke="#3498db" stroke-width="1.5" marker-end="url(#ab)"/>
+  <path d="M200,506 V462 H549 V310 H576" fill="none" stroke="#3498db" stroke-width="1.5" stroke-dasharray="5 3" marker-end="url(#ab)"/>
+
+  <!-- VM mode -->
+  <rect x="470" y="472" width="425" height="128" rx="12" fill="none" stroke="#f1c40f" stroke-dasharray="6 4"/>
+  <text x="488" y="494" fill="#f1c40f" font-size="12" font-weight="600">OpenBao vm mode (separate)</text>
+  <rect x="485" y="506" width="180" height="80" rx="8" fill="url(#card)" stroke="#f1c40f"/>
+  <text x="575" y="528" text-anchor="middle" fill="#f1c40f" font-size="11" font-weight="600">ECS nodes + bastion</text>
+  <text x="575" y="545" text-anchor="middle" fill="#aab" font-size="9">audit → /var/log/openbao/</text>
+  <text x="575" y="559" text-anchor="middle" fill="#889" font-size="9">ICAgent (LTS host groups)</text>
+  <text x="575" y="573" text-anchor="middle" fill="#889" font-size="9">enable_lts_logging</text>
+  <rect x="695" y="506" width="185" height="80" rx="8" fill="url(#card)" stroke="#e74c3c"/>
+  <text x="787" y="528" text-anchor="middle" fill="#e74c3c" font-size="11" font-weight="600">LTS &lt;prefix&gt;-openbao-logs</text>
+  <text x="787" y="545" text-anchor="middle" fill="#aab" font-size="9">audit · security · system</text>
+  <text x="787" y="559" text-anchor="middle" fill="#889" font-size="9">cloud-init streams</text>
+  <line x1="665" y1="546" x2="693" y2="546" stroke="#e74c3c" stroke-width="1.5" marker-end="url(#ar)"/>
+
+  <text x="735" y="430" text-anchor="middle" fill="#666" font-size="9">Not managed by OpenTofu: control-plane logs,</text>
+  <text x="735" y="444" text-anchor="middle" fill="#666" font-size="9">kube-apiserver audit (CCE console)</text>
+</svg>

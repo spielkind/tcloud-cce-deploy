@@ -1,10 +1,21 @@
 # OpenBao Auto-Unseal
 
-Automatic unsealing for OpenBao on OTC CCE using an Init Container, FunctionGraph, KMS, and OBS.
+Automatic unsealing for the in-cluster OpenBao (`openbao_mode = "cce"`) using an Init Container, FunctionGraph, KMS, and OBS. The VM variant unseals itself with KMS via an ECS agency instead — see [OpenBao on VMs](openbao-vm.md#operations).
+
+## Contents
+
+- [Architecture](#architecture)
+- [How It Works](#how-it-works)
+- [Components](#components)
+- [Prerequisites](#prerequisites)
+- [Setup](#setup)
+- [Function Parameters](#function-parameters)
+- [Variables](#variables)
+- [Security](#security)
 
 ## Architecture
 
-![OpenBao Auto-Unseal](openbao-unseal.svg)
+![OpenBao Auto-Unseal](diagrams/openbao-unseal.svg)
 
 ## How It Works
 
@@ -39,7 +50,8 @@ All resources are named `${name_prefix}-openbao-unseal` (module `infra/modules/o
 
 ## Prerequisites
 
-- [Workload Identity](workload-identity.md) must be enabled (`create_workload_identity = true`)
+- `openbao_mode = "cce"` in infra (both modules are skipped in other modes)
+- [Workload Identity](workload-identity.md) must be enabled (`create_workload_identity = true`, requires `bind_api_eip = true`)
 - OpenBao must be deployed (`create_openbao = true`)
 - OTC project name set via `TF_VAR_otc_project_name` (GitHub Actions: repository variable `OTC_PROJECT_NAME`)
 
@@ -48,25 +60,33 @@ All resources are named `${name_prefix}-openbao-unseal` (module `infra/modules/o
 ### 1. Enable in tfvars
 
 ```hcl
-# infra/terraform.tfvars
+# infra/envs/<env>.tfvars
+openbao_mode             = "cce"
+bind_api_eip             = true
 create_openbao_unseal    = true
 create_workload_identity = true
 
-# apps/terraform.tfvars
+# workloads/envs/<env>.tfvars
 create_openbao = true
 ```
 
-The apps project reads the project name from the infra remote state output `otc_project_name`.
+dev already has these settings.
 
-### 2. Apply infra first, then apps
+The workloads root reads the project name from the infra remote state output `otc_project_name`.
+
+### 2. Apply infra first, then workloads
+
+Deploy workflow (Apply), or locally:
 
 ```bash
-cd infra && tofu apply
-cd ../apps && tofu apply
+tofu -chdir=infra init -reconfigure -backend-config=envs/dev.backend.tfvars
+tofu -chdir=infra apply -var-file=envs/dev.tfvars
+tofu -chdir=workloads init -reconfigure -backend-config=envs/dev.backend.tfvars
+tofu -chdir=workloads apply -var-file=envs/dev.tfvars
 ```
 
 Infra creates the KMS key, OBS bucket, IAM agency, FunctionGraph function, and Workload Identity.
-Apps creates the OpenBao Helm release with the init container, ConfigMap, and projected volume.
+Workloads creates the OpenBao Helm release with the init container, ConfigMap, and projected volume.
 
 Infra outputs: `openbao_unseal_kms_key_id`, `openbao_unseal_obs_bucket`, `openbao_unseal_function_urn`.
 
@@ -117,8 +137,8 @@ curl -s -X POST \
 
 | Variable | Default | Description |
 |---|---|---|
-| `create_openbao_unseal` | `false` | Deploy auto-unseal infrastructure (infra) |
-| `otc_project_name` | — (required) | OTC project name for IAM token exchange (infra; from `TF_VAR_otc_project_name` / repository variable `OTC_PROJECT_NAME`, passed to apps via remote state) |
+| `create_openbao_unseal` | `false` | Deploy auto-unseal infrastructure (infra; only with `openbao_mode = "cce"`) |
+| `otc_project_name` | — (required) | T-Cloud project name for IAM token exchange (infra; from `TF_VAR_otc_project_name` / repository variable `OTC_PROJECT_NAME`, passed to workloads via remote state) |
 
 ## Security
 

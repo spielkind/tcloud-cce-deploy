@@ -1,0 +1,129 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 640" font-family="Inter, -apple-system, sans-serif">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1a1a2e"/>
+      <stop offset="100%" stop-color="#16213e"/>
+    </linearGradient>
+    <linearGradient id="card" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1e2a4a"/>
+      <stop offset="100%" stop-color="#1a2340"/>
+    </linearGradient>
+    <marker id="ag" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6" fill="#2ecc71"/></marker>
+    <marker id="ap" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6" fill="#9b59b6"/></marker>
+    <marker id="ab" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6" fill="#3498db"/></marker>
+    <marker id="ar" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6" fill="#e74c3c"/></marker>
+  </defs>
+
+  <rect width="1000" height="640" fill="url(#bg)" rx="12"/>
+  <text x="500" y="34" text-anchor="middle" fill="#fff" font-size="18" font-weight="700">Monitoring Options</text>
+  <text x="500" y="53" text-anchor="middle" fill="#889" font-size="10">data flow: sources in the cluster → metric storage → visualisation · not implemented, see docs/monitoring.md</text>
+
+  <!-- ===== Column A ===== -->
+  <rect x="20" y="70" width="310" height="490" rx="12" fill="none" stroke="#2ecc71"/>
+  <text x="175" y="94" text-anchor="middle" fill="#2ecc71" font-size="14" font-weight="700">A · Self-hosted</text>
+  <text x="175" y="110" text-anchor="middle" fill="#889" font-size="9">everything inside the CCE cluster</text>
+
+  <rect x="38" y="124" width="274" height="62" rx="8" fill="url(#card)" stroke="#4a6fa5"/>
+  <text x="175" y="144" text-anchor="middle" fill="#e0e0e0" font-size="11" font-weight="600">Sources</text>
+  <text x="175" y="160" text-anchor="middle" fill="#aab" font-size="9">node-exporter · kube-state-metrics · kubelet/cAdvisor</text>
+  <text x="175" y="174" text-anchor="middle" fill="#aab" font-size="9">ServiceMonitors: ingress, OpenBao, GPU (DCGM)</text>
+
+  <rect x="38" y="210" width="274" height="96" rx="8" fill="#14301f" stroke="#2ecc71"/>
+  <text x="175" y="232" text-anchor="middle" fill="#2ecc71" font-size="11" font-weight="600">cie-collector addon (server mode)</text>
+  <text x="175" y="249" text-anchor="middle" fill="#aab" font-size="9">Cloud Native Cluster Monitoring</text>
+  <text x="175" y="263" text-anchor="middle" fill="#aab" font-size="9">Prometheus operator + Prometheus</text>
+  <text x="175" y="281" text-anchor="middle" fill="#e67e22" font-size="9">TSDB on EVS PVC (csi-disk-topology)</text>
+  <text x="175" y="295" text-anchor="middle" fill="#889" font-size="9">retention + size are your job</text>
+  <line x1="175" y1="186" x2="175" y2="208" stroke="#2ecc71" stroke-width="1.5" marker-end="url(#ag)"/>
+  <text x="182" y="201" fill="#2ecc71" font-size="8" font-style="italic">scrape</text>
+
+  <rect x="38" y="330" width="274" height="62" rx="8" fill="url(#card)" stroke="#f39c12"/>
+  <text x="175" y="352" text-anchor="middle" fill="#f39c12" font-size="11" font-weight="600">grafana addon</text>
+  <text x="175" y="368" text-anchor="middle" fill="#aab" font-size="9">datasource: in-cluster Prometheus</text>
+  <text x="175" y="382" text-anchor="middle" fill="#aab" font-size="9">ingress grafana.&lt;zone&gt; + TLS + login</text>
+  <line x1="175" y1="306" x2="175" y2="328" stroke="#f39c12" stroke-width="1.5" marker-end="url(#ag)"/>
+
+  <rect x="38" y="416" width="274" height="128" rx="8" fill="#141c33" stroke="#2a3550"/>
+  <text x="54" y="436" fill="#2ecc71" font-size="10" font-weight="600">+ full history, pod and GPU metrics</text>
+  <text x="54" y="452" fill="#2ecc71" font-size="10" font-weight="600">+ 100 % OpenTofu (addons + manifests)</text>
+  <text x="54" y="468" fill="#2ecc71" font-size="10" font-weight="600">+ no credentials in the state</text>
+  <text x="54" y="490" fill="#e74c3c" font-size="10" font-weight="600">− CPU/RAM on the worker nodes</text>
+  <text x="54" y="506" fill="#e74c3c" font-size="10" font-weight="600">− storage, retention, upgrades: you</text>
+  <text x="54" y="522" fill="#e74c3c" font-size="10" font-weight="600">− data lost with the cluster</text>
+  <text x="54" y="538" fill="#889" font-size="9">best for: dev/POC, full Grafana experience</text>
+
+  <!-- ===== Column B ===== -->
+  <rect x="345" y="70" width="310" height="490" rx="12" fill="none" stroke="#9b59b6"/>
+  <text x="500" y="94" text-anchor="middle" fill="#bb8fce" font-size="14" font-weight="700">B · AOM-managed</text>
+  <text x="500" y="110" text-anchor="middle" fill="#889" font-size="9">collector in the cluster, storage in AOM</text>
+
+  <rect x="363" y="124" width="274" height="62" rx="8" fill="url(#card)" stroke="#4a6fa5"/>
+  <text x="500" y="144" text-anchor="middle" fill="#e0e0e0" font-size="11" font-weight="600">Sources</text>
+  <text x="500" y="160" text-anchor="middle" fill="#aab" font-size="9">same exporters and ServiceMonitors as A</text>
+  <text x="500" y="174" text-anchor="middle" fill="#aab" font-size="9">(node, KSM, kubelet, ingress, OpenBao, GPU)</text>
+
+  <rect x="363" y="210" width="274" height="62" rx="8" fill="#241433" stroke="#9b59b6"/>
+  <text x="500" y="232" text-anchor="middle" fill="#bb8fce" font-size="11" font-weight="600">cie-collector addon (agent mode)</text>
+  <text x="500" y="249" text-anchor="middle" fill="#aab" font-size="9">lightweight agent, no local TSDB</text>
+  <text x="500" y="263" text-anchor="middle" fill="#aab" font-size="9">remote write with AOM app key/secret</text>
+  <line x1="500" y1="186" x2="500" y2="208" stroke="#9b59b6" stroke-width="1.5" marker-end="url(#ap)"/>
+
+  <rect x="363" y="296" width="274" height="56" rx="8" fill="url(#card)" stroke="#9b59b6" stroke-dasharray="5 3"/>
+  <text x="500" y="318" text-anchor="middle" fill="#bb8fce" font-size="11" font-weight="600">AOM Prometheus instance (type CCE)</text>
+  <text x="500" y="334" text-anchor="middle" fill="#e74c3c" font-size="9">no provider resource → console / API once</text>
+  <text x="500" y="346" text-anchor="middle" fill="#889" font-size="9">managed storage + retention</text>
+  <line x1="500" y1="272" x2="500" y2="294" stroke="#9b59b6" stroke-width="1.5" marker-end="url(#ap)"/>
+  <text x="507" y="287" fill="#bb8fce" font-size="8" font-style="italic">remote write</text>
+
+  <rect x="363" y="370" width="274" height="34" rx="8" fill="url(#card)" stroke="#f39c12"/>
+  <text x="500" y="391" text-anchor="middle" fill="#f39c12" font-size="10" font-weight="600">AOM console · or grafana addon (AOM datasource)</text>
+  <line x1="500" y1="352" x2="500" y2="368" stroke="#f39c12" stroke-width="1.5" marker-end="url(#ap)"/>
+
+  <rect x="363" y="416" width="274" height="128" rx="8" fill="#141c33" stroke="#2a3550"/>
+  <text x="379" y="436" fill="#2ecc71" font-size="10" font-weight="600">+ managed storage, survives the cluster</text>
+  <text x="379" y="452" fill="#2ecc71" font-size="10" font-weight="600">+ small footprint in the cluster</text>
+  <text x="379" y="468" fill="#2ecc71" font-size="10" font-weight="600">+ pod and GPU metrics, history</text>
+  <text x="379" y="490" fill="#e74c3c" font-size="10" font-weight="600">− AOM instance not in OpenTofu</text>
+  <text x="379" y="506" fill="#e74c3c" font-size="10" font-weight="600">− app key/secret in addon config (state)</text>
+  <text x="379" y="522" fill="#e74c3c" font-size="10" font-weight="600">− AOM costs per series/ingestion</text>
+  <text x="379" y="538" fill="#889" font-size="9">best for: prod, several clusters</text>
+
+  <!-- ===== Column C ===== -->
+  <rect x="670" y="70" width="310" height="490" rx="12" fill="none" stroke="#3498db"/>
+  <text x="825" y="94" text-anchor="middle" fill="#3498db" font-size="14" font-weight="700">C · Without Prometheus</text>
+  <text x="825" y="110" text-anchor="middle" fill="#889" font-size="9">cloud services + logs, nothing extra in the cluster</text>
+
+  <rect x="688" y="124" width="274" height="62" rx="8" fill="url(#card)" stroke="#3498db"/>
+  <text x="825" y="144" text-anchor="middle" fill="#3498db" font-size="11" font-weight="600">Cloud Eye (CES)</text>
+  <text x="825" y="160" text-anchor="middle" fill="#aab" font-size="9">ECS nodes · EVS · ELB · NAT · EIP (automatic)</text>
+  <text x="825" y="174" text-anchor="middle" fill="#aab" font-size="9">ces_resource_group_v2 (type TAG)</text>
+
+  <rect x="688" y="198" width="274" height="62" rx="8" fill="url(#card)" stroke="#e74c3c"/>
+  <text x="825" y="218" text-anchor="middle" fill="#e74c3c" font-size="11" font-weight="600">LTS (existing log-agent)</text>
+  <text x="825" y="234" text-anchor="middle" fill="#aab" font-size="9">structuring templates (NGINX, CCE_EVENT, CTS, VPC)</text>
+  <text x="825" y="248" text-anchor="middle" fill="#aab" font-size="9">saved searches · SQL charts in LTS</text>
+
+  <rect x="688" y="272" width="274" height="46" rx="8" fill="url(#card)" stroke="#4a6fa5"/>
+  <text x="825" y="292" text-anchor="middle" fill="#e0e0e0" font-size="11" font-weight="600">metrics-server (exists)</text>
+  <text x="825" y="307" text-anchor="middle" fill="#aab" font-size="9">kubectl top · HPA · no history</text>
+
+  <rect x="688" y="330" width="274" height="62" rx="8" fill="url(#card)" stroke="#f39c12"/>
+  <text x="825" y="350" text-anchor="middle" fill="#f39c12" font-size="11" font-weight="600">Consoles</text>
+  <text x="825" y="366" text-anchor="middle" fill="#aab" font-size="9">CES metric views · LTS search/analysis</text>
+  <text x="825" y="380" text-anchor="middle" fill="#aab" font-size="9">CCE console workload monitoring (basic)</text>
+
+  <rect x="688" y="416" width="274" height="128" rx="8" fill="#141c33" stroke="#2a3550"/>
+  <text x="704" y="436" fill="#2ecc71" font-size="10" font-weight="600">+ no extra workloads, near zero cost</text>
+  <text x="704" y="452" fill="#2ecc71" font-size="10" font-weight="600">+ OpenTofu, no secrets in the state</text>
+  <text x="704" y="468" fill="#2ecc71" font-size="10" font-weight="600">+ builds on the existing logging</text>
+  <text x="704" y="490" fill="#e74c3c" font-size="10" font-weight="600">− no pod/container metric history</text>
+  <text x="704" y="506" fill="#e74c3c" font-size="10" font-weight="600">− no Grafana, no GPU metrics</text>
+  <text x="704" y="522" fill="#e74c3c" font-size="10" font-weight="600">− CES dashboards: no widgets via Tofu</text>
+  <text x="704" y="538" fill="#889" font-size="9">best for: minimal footprint, log-based ops</text>
+
+  <!-- legend / footer -->
+  <rect x="20" y="574" width="960" height="50" rx="10" fill="#141c33" stroke="#2a3550"/>
+  <text x="40" y="595" fill="#e0e0e0" font-size="11" font-weight="600">Always available today:</text>
+  <text x="200" y="595" fill="#aab" font-size="10">metrics-server · log-agent → LTS (stdout, events, node files) · OpenBao audit · CTS</text>
+  <text x="40" y="613" fill="#889" font-size="10">Legacy, do not use: CCE addon "prometheus" (replaced by cie-collector) · ICAgent in the cluster (replaced by log-agent)</text>
+</svg>

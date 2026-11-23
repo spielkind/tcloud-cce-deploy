@@ -24,6 +24,22 @@ variable "create_nat" {
   default = true
 }
 
+variable "nat_spec" {
+  description = "NAT gateway size: 1 (small), 2 (medium), 3 (large), 4 (extra-large)"
+  type        = string
+  default     = "1"
+  validation {
+    condition     = contains(["1", "2", "3", "4"], var.nat_spec)
+    error_message = "nat_spec must be one of \"1\", \"2\", \"3\", \"4\"."
+  }
+}
+
+variable "eip_bandwidth" {
+  description = "NAT EIP bandwidth in Mbit/s"
+  type        = number
+  default     = 100
+}
+
 variable "tags" {
   type    = map(string)
   default = {}
@@ -39,7 +55,7 @@ resource "opentelekomcloud_vpc_eip_v1" "nat" {
 
   bandwidth {
     name       = "${var.name_prefix}-nat-bw"
-    size       = 100
+    size       = var.eip_bandwidth
     share_type = "PER"
   }
 
@@ -51,7 +67,7 @@ resource "opentelekomcloud_nat_gateway_v2" "this" {
   count = var.create_nat ? 1 : 0
 
   name                = "${var.name_prefix}-nat"
-  spec                = "1" # small
+  spec                = var.nat_spec
   router_id           = var.vpc_id
   internal_network_id = var.subnet_id
   tags                = var.tags
@@ -76,5 +92,6 @@ resource "opentelekomcloud_nat_snat_rule_v2" "eni" {
 }
 
 output "nat_public_ip" {
-  value = var.create_nat ? opentelekomcloud_vpc_eip_v1.nat[0].publicip[0].ip_address : null
+  description = "Public IP used for outbound (SNAT) traffic"
+  value       = var.create_nat ? opentelekomcloud_vpc_eip_v1.nat[0].publicip[0].ip_address : null
 }

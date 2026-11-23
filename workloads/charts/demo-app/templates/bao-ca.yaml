@@ -1,0 +1,9 @@
+{{- if .Values.baoCaCert }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: demo-app-bao-ca
+data:
+  ca.pem: |
+    {{- .Values.baoCaCert | nindent 4 }}
+{{- end }}

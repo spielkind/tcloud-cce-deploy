@@ -1,0 +1,93 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gpu-demo
+spec:
+  replicas: {{ .Values.replicas }}
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: gpu-demo
+  template:
+    metadata:
+      labels:
+        app: gpu-demo
+      {{- if .Values.openbao.enabled }}
+      annotations:
+        # Hugging Face token from OpenBao (scripts/gpu-demo-openbao-setup.sh) -> /vault/secrets/hf
+        vault.hashicorp.com/agent-inject: "true"
+        vault.hashicorp.com/agent-pre-populate: "false"
+        vault.hashicorp.com/role: {{ .Values.openbao.role | quote }}
+        vault.hashicorp.com/agent-inject-secret-hf: {{ .Values.openbao.secretPath | quote }}
+        vault.hashicorp.com/agent-inject-template-hf: |
+          {{`{{- with secret `}}"{{ .Values.openbao.secretPath }}"{{` -}}{{ .Data.data | toJSON }}{{- end -}}`}}
+      {{- end }}
+    spec:
+      serviceAccountName: gpu-demo
+      imagePullSecrets:
+        - name: default-secret
+      nodeSelector:
+        {{- toYaml .Values.nodeSelector | nindent 8 }}
+      tolerations:
+        {{- toYaml .Values.tolerations | nindent 8 }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: gpu-demo
+          image: {{ .Values.image | quote }}
+          env:
+            - name: MODEL_ID
+              value: {{ .Values.models.image | quote }}
+            - name: CHAT_MODEL
+              value: {{ .Values.models.chat | quote }}
+            - name: STT_MODEL
+              value: {{ .Values.models.stt | quote }}
+            - name: VISION_MODEL
+              value: {{ .Values.models.vision | quote }}
+            - name: PRELOAD
+              value: {{ .Values.preload | quote }}
+            - name: IMAGE_SIZE
+              value: {{ .Values.imageSize | quote }}
+          ports:
+            - containerPort: 8000
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: 8000
+            periodSeconds: 10
+            failureThreshold: 30
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8000
+            periodSeconds: 20
+          # Ready only after the model is loaded (first start downloads ~7 GB).
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8000
+            periodSeconds: 10
+          volumeMounts:
+            - name: models
+              mountPath: /models
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: models
+          persistentVolumeClaim:
+            claimName: gpu-demo-models
+        - name: tmp
+          emptyDir: {}

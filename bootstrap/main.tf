@@ -55,6 +55,10 @@ provider "opentelekomcloud" {
   auth_url    = "https://iam.${var.region}.otc.t-systems.com/v3"
 }
 
+# Bootstrap state is intentionally kept local (bootstrap/terraform.tfstate,
+# gitignored): the bucket that would hold it is created here. Keep a backup of
+# that file; losing it only means re-importing the bucket and key.
+
 resource "random_id" "id" {
   byte_length = 4
 }
@@ -64,7 +68,11 @@ resource "opentelekomcloud_kms_key_v1" "state" {
   key_description = "${var.name_prefix}-tfstate-${random_id.id.hex} encryption key"
   pending_days    = 7
   is_enabled      = true
-  tags            = var.tags
+
+  rotation_enabled  = true
+  rotation_interval = 365
+
+  tags = var.tags
 }
 
 resource "opentelekomcloud_obs_bucket" "state" {
@@ -87,13 +95,34 @@ resource "opentelekomcloud_obs_bucket" "state" {
   }
 }
 
+locals {
+  environments = ["dev", "prod"]
+
+  # State object keys: <environment>/<stack>/terraform.tfstate
+  state_keys = {
+    for env in local.environments : env => {
+      infra     = "${env}/infra/terraform.tfstate"
+      workloads = "${env}/workloads/terraform.tfstate"
+    }
+  }
+
+  obs_endpoint = "https://obs.${var.region}.otc.t-systems.com"
+}
+
+# infra/backend.tf; the key defaults to dev and is overridden per environment
+# with -backend-config=envs/<env>.backend.tfvars.
 output "backend_config" {
   value = <<-EOT
+    # The key is overridden per environment with
+    #   tofu init -backend-config=envs/<env>.backend.tfvars
+    # (dev/infra/terraform.tfstate or prod/infra/terraform.tfstate).
+    # No `encrypt = true`: it would send an AES256 header that overrides the bucket's
+    # default SSE-KMS encryption.
     terraform {
       backend "s3" {
         bucket                      = "${opentelekomcloud_obs_bucket.state.bucket}"
-        key                         = "cce/terraform.tfstate"
-        endpoint                    = "https://obs.${var.region}.otc.t-systems.com"
+        key                         = "${local.state_keys["dev"].infra}"
+        endpoint                    = "${local.obs_endpoint}"
         region                      = "${var.region}"
         skip_credentials_validation = true
         skip_region_validation      = true
@@ -105,13 +134,17 @@ output "backend_config" {
   EOT
 }
 
-output "apps_backend_config" {
+# workloads/backend.tf; the remote state key follows var.environment.
+output "workloads_backend_config" {
   value = <<-EOT
+    # The bucket is created by bootstrap/ (it rewrites the name on a new bootstrap).
+    # The state key comes from envs/<env>.backend.tfvars; the bucket's default
+    # SSE-KMS encryption covers the state objects, so no KMS key ID is pinned here.
     terraform {
       backend "s3" {
         bucket                      = "${opentelekomcloud_obs_bucket.state.bucket}"
-        key                         = "cce/apps.tfstate"
-        endpoint                    = "https://obs.${var.region}.otc.t-systems.com"
+        key                         = "${local.state_keys["dev"].workloads}"
+        endpoint                    = "${local.obs_endpoint}"
         region                      = "${var.region}"
         skip_credentials_validation = true
         skip_region_validation      = true
@@ -125,11 +158,9 @@ output "apps_backend_config" {
       backend = "s3"
       config = {
         bucket                      = "${opentelekomcloud_obs_bucket.state.bucket}"
-        key                         = "cce/terraform.tfstate"
-        endpoint                    = "https://obs.${var.region}.otc.t-systems.com"
+        key                         = "$${var.environment}/infra/terraform.tfstate"
+        endpoint                    = "${local.obs_endpoint}"
         region                      = "${var.region}"
-        encrypt                     = true
-        kms_key_id                  = "arn:aws:kms:${var.region}:${opentelekomcloud_kms_key_v1.state.domain_id}:key/${opentelekomcloud_kms_key_v1.state.id}"
         skip_credentials_validation = true
         skip_region_validation      = true
         skip_metadata_api_check     = true
@@ -138,6 +169,21 @@ output "apps_backend_config" {
       }
     }
   EOT
+}
+
+# Per-environment -backend-config files:
+#   envs/<env>.backend.tfvars for infra and workloads.
+output "backend_tfvars" {
+  value = {
+    for env, keys in local.state_keys : env => {
+      infra     = "key = \"${keys.infra}\"\n"
+      workloads = "key = \"${keys.workloads}\"\n"
+    }
+  }
+}
+
+output "state_keys" {
+  value = local.state_keys
 }
 
 output "bucket_name" {

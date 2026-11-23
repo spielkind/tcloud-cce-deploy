@@ -11,7 +11,7 @@ import subprocess
 import sys
 from urllib.request import Request, urlopen
 
-REGION = "eu-de"
+REGION = os.environ.get("OTC_REGION", "eu-de")
 OBS_ENDPOINT = f"https://obs.{REGION}.otc.t-systems.com"
 OBJECT_KEY = "openbao-unseal/test-keys.enc"
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))

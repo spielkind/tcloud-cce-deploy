@@ -1,0 +1,18 @@
+image: ""
+hostname: ""
+baoAddr: "http://openbao.openbao.svc:8200"
+# PEM CA for a privately signed OpenBao TLS certificate (VM mode with BYO TLS).
+# Leave empty for the in-cluster service or Let's Encrypt.
+baoCaCert: ""
+baoRole: "demo-app"
+secretPath: "kv/data/demo/config"
+accessMode: "both"
+# Seconds between sidecar re-renders of /vault/secrets/config.
+renderInterval: 30
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi

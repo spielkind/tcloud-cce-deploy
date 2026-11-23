@@ -1,11 +1,23 @@
 # Workload Identity (OIDC)
 
-Secure pod-to-cloud-service authentication without AK/SK credentials.
+Secure pod-to-cloud-service authentication without AK/SK credentials. Used by the OpenBao auto-unseal in `openbao_mode = "cce"`; the module is only created in cce mode.
 OTC equivalent of AWS IRSA (IAM Roles for Service Accounts).
+
+## Contents
+
+- [Architecture](#architecture)
+- [How It Works](#how-it-works)
+- [Components](#components)
+- [Setup](#setup)
+- [Adding Workloads](#adding-workloads)
+- [Token Details](#token-details)
+- [Security](#security)
+- [Variables](#variables)
+- [References](#references)
 
 ## Architecture
 
-![Workload Identity](workload-identity.svg)
+![Workload Identity](diagrams/workload-identity.svg)
 
 ## How It Works
 
@@ -37,6 +49,9 @@ kubectl get --raw /openid/v1/jwks
 ### 2. Enable in tfvars
 
 ```hcl
+# infra/envs/<env>.tfvars
+openbao_mode             = "cce"
+bind_api_eip             = true
 create_workload_identity = true
 ```
 
@@ -45,9 +60,11 @@ The JWKS is fetched automatically via `data.external` when `create_workload_iden
 ### 3. Apply
 
 ```bash
-cd infra
-tofu apply
+tofu -chdir=infra init -reconfigure -backend-config=envs/dev.backend.tfvars
+tofu -chdir=infra apply -var-file=envs/dev.tfvars
 ```
+
+Outputs: `workload_identity_provider_id` (`<name_prefix>-workload-id`, dev: `test-workload-id`) and `workload_identity_client_id` (`otc-workload-identity`).
 
 ### 4. Add projected volume to pod spec
 
@@ -80,7 +97,7 @@ OIDC=$(cat /var/run/secrets/tokens/oidc-token)
 IAM_TOKEN=$(curl -si -X POST \
   "https://iam.eu-de.otc.t-systems.com/v3.0/OS-AUTH/id-token/tokens" \
   -H "Content-Type: application/json" \
-  -H "X-Idp-Id: test-workload-id" \
+  -H "X-Idp-Id: <name_prefix>-workload-id" \
   -d '{"auth":{"id_token":{"id":"'"$OIDC"'"},"scope":{"project":{"name":"eu-de_<project>"}}}}' \
   | grep X-Subject-Token | awk '{print $2}' | tr -d '\r')
 
@@ -147,8 +164,8 @@ Current workloads:
 
 | Variable | Default | Description |
 |---|---|---|
-| `create_workload_identity` | `false` | Enable OIDC workload identity |
-| `otc_project_name` | — (required) | Project scope for the token exchange — set via `TF_VAR_otc_project_name` (GitHub Actions: repository variable `OTC_PROJECT_NAME`) |
+| `create_workload_identity` | `false` | Enable OIDC workload identity (only with `openbao_mode = "cce"`; requires `bind_api_eip = true`) |
+| `otc_project_name` | — (required) | T-Cloud project scope for token exchange — set via `TF_VAR_otc_project_name` (GitHub Actions: repository variable `OTC_PROJECT_NAME`) |
 
 ## References
 

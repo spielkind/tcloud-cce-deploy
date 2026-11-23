@@ -1,0 +1,923 @@
+#!/bin/bash
+set -euo pipefail
+# Install prerequisites
+
+apt-get update -qq
+apt-get install -y -qq curl jq awscli python3
+
+# Shared helpers for the bao-* scripts below
+mkdir -p /usr/local/lib/openbao
+
+# Temporary AK/SK of the ECS agency from the metadata service (source it).
+cat > /usr/local/lib/openbao/agency-creds.sh <<'CREDSEOF'
+CREDS=$(curl -sf http://169.254.169.254/openstack/latest/securitykey)
+AWS_ACCESS_KEY_ID=$(jq -r '.credential.access' <<< "$CREDS")
+AWS_SECRET_ACCESS_KEY=$(jq -r '.credential.secret' <<< "$CREDS")
+AWS_SESSION_TOKEN=$(jq -r '.credential.securitytoken' <<< "$CREDS")
+export AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
+unset CREDS
+CREDSEOF
+
+# TLS settings: node certificates are issued for the FQDN, so connections to
+# node IPs verify them via BAO_TLS_SERVER_NAME / curl --connect-to instead of
+# skipping verification. Let's Encrypt chains are verified with the system CAs.
+cat > /usr/local/lib/openbao/tls.sh <<'TLSLIBEOF'
+BAO_FQDN="${fqdn}"
+export BAO_TLS_SERVER_NAME="$BAO_FQDN"
+CURL_TLS=()
+%{ if !enable_letsencrypt ~}
+export BAO_CACERT="/etc/openbao/tls/ca.pem"
+CURL_TLS=(--cacert "$BAO_CACERT")
+%{ endif ~}
+
+# node_curl <ip> <path> [curl args...]
+node_curl() {
+  local ip=$1 path=$2
+  shift 2
+  curl -s "$${CURL_TLS[@]}" --connect-to "$BAO_FQDN:8200:$ip:8200" "$@" "https://$BAO_FQDN:8200$path"
+}
+TLSLIBEOF
+
+# Resolve the API FQDN to the internal ELB VIP. The public name points to the
+# ELB EIP, which the bastion could only reach via the NAT EIP (not allowed by
+# api_allowed_cidrs). The VIP path keeps the bastion's private source address.
+# The cloud-init template is updated too in case it regenerates /etc/hosts.
+for HOSTS_FILE in /etc/hosts /etc/cloud/templates/hosts.debian.tmpl; do
+  if [ -f "$HOSTS_FILE" ] && ! grep -q " ${fqdn}$" "$HOSTS_FILE"; then
+    echo "${elb_vip} ${fqdn}" >> "$HOSTS_FILE"
+  fi
+done
+# Install OpenBao CLI v${openbao_version}
+
+curl -fsSL "https://github.com/openbao/openbao/releases/download/v${openbao_version}/openbao_${openbao_version}_linux_amd64.deb" \
+  -o /tmp/openbao.deb
+dpkg -i /tmp/openbao.deb
+rm -f /tmp/openbao.deb
+# Write CA certificate for TLS verification
+
+mkdir -p /etc/openbao/tls
+cat > /etc/openbao/tls/ca.pem <<'TLSCA'
+${tls_ca_cert}
+TLSCA
+# Environment defaults
+
+cat > /etc/profile.d/openbao.sh <<'ENVEOF'
+export BAO_ADDR="https://${fqdn}:8200"
+%{ if !enable_letsencrypt ~}
+export BAO_CACERT="/etc/openbao/tls/ca.pem"
+%{ endif ~}
+ENVEOF
+
+# OBS + KMS config (used by snapshots, script downloads, and auto-unseal)
+
+cat > /etc/openbao/auto-unseal.env <<'AUEOF'
+KMS_REGION=${kms_region}
+KMS_KEY_ID=${kms_key_id}
+OBS_BUCKET=${obs_bucket}
+OBS_KEY=unseal-keys/encrypted.json
+INIT_NODE=https://${node_ips[0]}:8200
+AUEOF
+chmod 600 /etc/openbao/auto-unseal.env
+
+# shellcheck source=/dev/null
+source /usr/local/lib/openbao/agency-creds.sh
+
+OBS_ENDPOINT="https://obs.${obs_region}.otc.t-systems.com"
+aws s3 cp "s3://${obs_bucket}/scripts/openbao-kms.py" /usr/local/bin/openbao-kms.py \
+  --endpoint-url "$OBS_ENDPOINT" --region "${obs_region}"
+chmod 700 /usr/local/bin/openbao-kms.py
+
+%{ if enable_auto_unseal ~}
+
+cat > /usr/local/bin/bao-init.sh <<'INITEOF'
+#!/bin/bash
+set -euo pipefail
+
+# Usage: sudo bao-init.sh            (root token is revoked at the end)
+#        sudo KEEP_ROOT_TOKEN=true bao-init.sh   (print and keep the root token)
+# shellcheck source=/dev/null
+source /etc/openbao/auto-unseal.env
+# shellcheck source=/dev/null
+source /usr/local/lib/openbao/tls.sh
+
+KEEP_ROOT_TOKEN="$${KEEP_ROOT_TOKEN:-false}"
+
+echo "=== OpenBao Cluster Initialization ==="
+echo ""
+
+# Init targets the first node directly to ensure it becomes the Raft leader.
+# Other nodes join via retry_join and must be unsealed after the leader.
+INIT_NODE="https://${node_ips[0]}:8200"
+
+# Check if already initialized
+STATUS=$(node_curl "${node_ips[0]}" /v1/sys/seal-status 2>/dev/null || true)
+if jq -e '.initialized == true' <<< "$STATUS" >/dev/null 2>&1; then
+  # Check if keys are already in OBS
+  # shellcheck source=/dev/null
+  source /usr/local/lib/openbao/agency-creds.sh
+
+  if aws s3 ls "s3://$${OBS_BUCKET}/$${OBS_KEY}" \
+    --endpoint-url "https://obs.$${KMS_REGION}.otc.t-systems.com" \
+    --region "$${KMS_REGION}" >/dev/null 2>&1; then
+    echo "Cluster is already initialized and unseal keys are in OBS."
+    echo "Use bao-unseal.sh to unseal."
+    exit 0
+  else
+    echo "WARNING: Cluster is initialized but unseal keys are NOT in OBS."
+    echo "This can happen if the upload failed during a previous init."
+    echo ""
+    echo "To recover, you need the unseal keys from the original init output."
+    echo "Re-encrypt and upload them manually, or re-create the cluster."
+    exit 1
+  fi
+fi
+
+echo "Initializing node ${node_ips[0]} with 5 key shares, threshold 3..."
+INIT_OUTPUT=$(BAO_ADDR="$INIT_NODE" bao operator init -key-shares=5 -key-threshold=3 -format=json)
+
+ROOT_TOKEN=$(jq -r '.root_token' <<< "$INIT_OUTPUT")
+mapfile -t UNSEAL_KEYS < <(jq -r '.unseal_keys_b64[]' <<< "$INIT_OUTPUT")
+unset INIT_OUTPUT
+
+echo ""
+if [ "$KEEP_ROOT_TOKEN" = "true" ]; then
+  echo "=========================================="
+  echo "  ROOT TOKEN (KEEP_ROOT_TOKEN=true, save securely and revoke when done!):"
+  echo "  $ROOT_TOKEN"
+fi
+echo "=========================================="
+echo "  UNSEAL KEYS (save as offline backup!):"
+KEY_NUM=0
+for KEY in "$${UNSEAL_KEYS[@]}"; do
+  KEY_NUM=$((KEY_NUM + 1))
+  echo "  Key $KEY_NUM: $KEY"
+done
+echo "=========================================="
+echo ""
+echo "WARNING: Save the unseal keys externally NOW (they are also stored"
+echo "         KMS-encrypted in OBS for auto-unseal, never in plaintext)."
+echo ""
+
+# Encrypt each unseal key with KMS
+ENCRYPTED_KEYS="[]"
+KEY_NUM=0
+for KEY in "$${UNSEAL_KEYS[@]}"; do
+  KEY_NUM=$((KEY_NUM + 1))
+  PLAIN_B64=$(echo -n "$KEY" | base64 -w0)
+  CIPHER=$(/usr/local/bin/openbao-kms.py encrypt "$${KMS_KEY_ID}" "$PLAIN_B64")
+  ENCRYPTED_KEYS=$(echo "$ENCRYPTED_KEYS" | jq --arg c "$CIPHER" '. + [$c]')
+  echo "  Key $KEY_NUM/5 encrypted with KMS"
+done
+
+# Upload to OBS
+KEYS_JSON=$(echo "$ENCRYPTED_KEYS" | jq '{keys: .}')
+KEYS_FILE=$(mktemp)
+echo "$KEYS_JSON" > "$KEYS_FILE"
+
+# shellcheck source=/dev/null
+source /usr/local/lib/openbao/agency-creds.sh
+
+aws s3 cp "$KEYS_FILE" "s3://$${OBS_BUCKET}/$${OBS_KEY}" \
+  --endpoint-url "https://obs.$${KMS_REGION}.otc.t-systems.com" \
+  --region "$${KMS_REGION}"
+rm -f "$KEYS_FILE"
+
+echo ""
+echo "Encrypted unseal keys stored in OBS: s3://$${OBS_BUCKET}/$${OBS_KEY}"
+echo ""
+
+# Unseal all nodes using the shared unseal script
+echo "Unsealing leader node first, then waiting for Raft join..."
+/usr/local/bin/bao-unseal.sh
+
+# Set up AppRole for workloads-tofu
+export BAO_ADDR="$INIT_NODE"
+export BAO_TOKEN="$ROOT_TOKEN"
+
+# Wait for OpenBao to be ready after unseal
+for _ in $(seq 1 30); do
+  if bao status >/dev/null 2>&1; then
+    break
+  fi
+  sleep 2
+done
+
+/usr/local/bin/bao-approle.sh
+
+# Set up automated Raft snapshot backups
+/usr/local/bin/bao-snapshot-setup.sh
+
+# The AppRole (administration) and the snapshot token are in place, so the
+# root token is no longer needed. Regenerate one when required with
+# `bao operator generate-root` and a quorum of unseal keys.
+if [ "$KEEP_ROOT_TOKEN" != "true" ]; then
+  bao token revoke -self >/dev/null
+  echo "Root token revoked."
+fi
+unset BAO_TOKEN ROOT_TOKEN
+
+echo ""
+echo "=== Initialization complete ==="
+echo "Next steps:"
+echo "  1. Save the unseal keys externally"
+echo "  2. Store the AppRole credentials (see above) for administration"
+echo "  3. On reboot, VMs auto-unseal from OBS"
+echo "  4. Raft snapshots run automatically every 6h (cron)"
+echo "  5. Test: bao status"
+echo "  6. Root token needed later? bao operator generate-root (unseal key quorum)"
+INITEOF
+chmod 700 /usr/local/bin/bao-init.sh
+
+cat > /usr/local/bin/bao-approle.sh <<'APPROLEEOF'
+#!/bin/bash
+set -euo pipefail
+
+# Creates the "workloads-tofu" AppRole used for OpenBao administration from
+# outside the bastion (e.g. scripts/demo-app-openbao-setup.sh in VM mode).
+echo "=== OpenBao AppRole Setup (workloads-tofu) ==="
+echo ""
+
+if [ -z "$${BAO_TOKEN:-}" ]; then
+  echo "ERROR: BAO_TOKEN must be set (root token or equivalent)."
+  echo "Usage: sudo BAO_TOKEN=\"s.xxxxx\" bao-approle.sh"
+  exit 1
+fi
+
+# Enable AppRole auth method (idempotent — skip if already enabled)
+if ! bao auth list -format=json 2>/dev/null | jq -e '."approle/"' >/dev/null 2>&1; then
+  echo "Enabling AppRole auth method..."
+  bao auth enable approle
+else
+  echo "AppRole auth method already enabled."
+fi
+
+# Create/update scoped policy for workloads tofu
+echo "Writing policy workloads-tofu..."
+bao policy write workloads-tofu - <<'POLICYEOF'
+# Auth backends (enable/disable kubernetes auth)
+path "sys/auth" {
+  capabilities = ["read"]
+}
+path "sys/auth/*" {
+  capabilities = ["create", "read", "update", "delete", "sudo"]
+}
+
+# Auth method configuration (kubernetes roles, config)
+path "auth/*" {
+  capabilities = ["create", "read", "update", "delete", "list"]
+}
+
+# Secrets engines (enable/disable kv)
+path "sys/mounts" {
+  capabilities = ["read"]
+}
+path "sys/mounts/*" {
+  capabilities = ["create", "read", "update", "delete", "sudo"]
+}
+
+# Policy management
+path "sys/policies/acl/*" {
+  capabilities = ["create", "read", "update", "delete", "list"]
+}
+
+# KV v2 secrets
+path "kv/*" {
+  capabilities = ["create", "read", "update", "delete", "list"]
+}
+POLICYEOF
+
+# Create/update AppRole role
+echo "Writing AppRole role workloads-tofu..."
+bao write auth/approle/role/workloads-tofu \
+  token_policies="workloads-tofu" \
+  token_ttl=1h \
+  token_max_ttl=4h \
+  secret_id_ttl=0 \
+  secret_id_num_uses=0
+
+# Fetch credentials (role_id is stable, secret_id is always new)
+ROLE_ID=$(bao read -format=json auth/approle/role/workloads-tofu/role-id | jq -r '.data.role_id')
+SECRET_ID=$(bao write -format=json -f auth/approle/role/workloads-tofu/secret-id | jq -r '.data.secret_id')
+
+echo ""
+echo "=========================================="
+echo "  APPROLE CREDENTIALS (administration):"
+echo "  Role ID:   $ROLE_ID"
+echo "  Secret ID: $SECRET_ID"
+echo "=========================================="
+echo ""
+echo "  Export for scripts/demo-app-openbao-setup.sh:"
+echo "    export BAO_ROLE_ID=\"$ROLE_ID\""
+echo "    export BAO_SECRET_ID=\"$SECRET_ID\""
+echo ""
+APPROLEEOF
+chmod 700 /usr/local/bin/bao-approle.sh
+
+cat > /usr/local/bin/bao-unseal.sh <<'UNSEALEOF'
+#!/bin/bash
+set -euo pipefail
+
+source /etc/openbao/auto-unseal.env
+
+# shellcheck source=/dev/null
+source /usr/local/lib/openbao/tls.sh
+
+# Fetch encrypted keys from OBS
+# shellcheck source=/dev/null
+source /usr/local/lib/openbao/agency-creds.sh
+
+KEYS_FILE=$(mktemp)
+trap 'rm -f "$KEYS_FILE"' EXIT
+
+aws s3 cp "s3://$${OBS_BUCKET}/$${OBS_KEY}" "$KEYS_FILE" \
+  --endpoint-url "https://obs.$${KMS_REGION}.otc.t-systems.com" \
+  --region "$${KMS_REGION}" || {
+  echo "ERROR: No encrypted unseal keys found in OBS."
+  echo "Run bao-init.sh first."
+  exit 1
+}
+
+# Decrypt keys via KMS
+UNSEAL_KEYS=()
+KEY_COUNT=$(jq '.keys | length' "$KEYS_FILE")
+for i in $(seq 0 $((KEY_COUNT - 1))); do
+  CIPHER=$(jq -r ".keys[$i]" "$KEYS_FILE")
+  PLAIN_B64=$(/usr/local/bin/openbao-kms.py decrypt "" "$CIPHER")
+  UNSEAL_KEYS+=("$(base64 -d <<< "$PLAIN_B64")")
+done
+
+echo "Decrypted $KEY_COUNT unseal keys from OBS"
+echo ""
+
+# Unseal each node — wait for Raft join (initialized), then unseal
+MAX_UNSEAL_ATTEMPTS=3
+MAX_JOIN_WAIT=120  # seconds to wait for retry_join
+SEALED_REMAINING=false
+
+%{ for ip in node_ips ~}
+echo "Node ${ip}:"
+
+# Wait for node to become initialized (Raft join via retry_join)
+JOIN_WAITED=0
+while [ $JOIN_WAITED -lt $MAX_JOIN_WAIT ]; do
+  STATUS_JSON=$(node_curl "${ip}" /v1/sys/seal-status 2>/dev/null || echo '{}')
+  INITIALIZED=$(echo "$STATUS_JSON" | jq -r '.initialized // false')
+  if [ "$INITIALIZED" = "true" ]; then
+    break
+  fi
+  if [ $JOIN_WAITED -eq 0 ]; then
+    echo "  Waiting for Raft join..."
+  fi
+  sleep 5
+  JOIN_WAITED=$((JOIN_WAITED + 5))
+done
+
+if [ "$INITIALIZED" != "true" ]; then
+  echo "  WARNING: not initialized after $${MAX_JOIN_WAIT}s (Raft join failed?)"
+  SEALED_REMAINING=true
+else
+  # Node is initialized — unseal with retry loop
+  for ATTEMPT in $(seq 1 $MAX_UNSEAL_ATTEMPTS); do
+    SEALED=$(echo "$STATUS_JSON" | jq -r 'if .sealed then "true" else "false" end')
+    if [ "$SEALED" = "false" ]; then
+      echo "  UNSEALED"
+      break
+    fi
+    [ "$ATTEMPT" -gt 1 ] && echo "  Retry $ATTEMPT/$MAX_UNSEAL_ATTEMPTS..."
+    for KEY in "$${UNSEAL_KEYS[@]}"; do
+      bao operator unseal -address="https://${ip}:8200" "$KEY" >/dev/null 2>&1 || true
+    done
+    sleep 3
+    STATUS_JSON=$(node_curl "${ip}" /v1/sys/seal-status 2>/dev/null || echo '{}')
+  done
+  if [ "$SEALED" = "true" ]; then
+    echo "  WARNING: still sealed after $MAX_UNSEAL_ATTEMPTS attempts"
+    SEALED_REMAINING=true
+  fi
+fi
+%{ endfor ~}
+
+echo ""
+# Show final cluster status
+/usr/local/bin/bao-status.sh
+
+if [ "$SEALED_REMAINING" = "true" ]; then
+  echo ""
+  echo "Some nodes are still sealed. Try again: bao-unseal.sh"
+fi
+UNSEALEOF
+chmod 700 /usr/local/bin/bao-unseal.sh
+
+cat > /usr/local/bin/bao-status.sh <<'STATUSEOF'
+#!/bin/bash
+# shellcheck source=/dev/null
+source /usr/local/lib/openbao/tls.sh
+
+echo "=== OpenBao Node Status ==="
+%{ for ip in node_ips ~}
+STATUS=$(node_curl "${ip}" /v1/sys/seal-status 2>/dev/null)
+if [ -z "$STATUS" ]; then
+  echo "  ${ip}: Unreachable"
+else
+  SEALED=$(echo "$STATUS" | jq -r 'if .sealed then "SEALED" else "UNSEALED" end')
+  LEADER=$(echo "$STATUS" | jq -r '.cluster_name // "n/a"')
+  echo "  ${ip}: $SEALED (cluster: $LEADER)"
+fi
+%{ endfor ~}
+STATUSEOF
+chmod 755 /usr/local/bin/bao-status.sh
+
+%{ endif ~}
+
+# Raft Snapshot Backup — automated backups to OBS
+cat > /usr/local/bin/bao-snapshot.sh <<'SNAPEOF'
+#!/bin/bash
+set -euo pipefail
+
+source /etc/openbao/auto-unseal.env
+
+BAO_ADDR="https://${fqdn}:8200"
+%{ if enable_letsencrypt ~}
+export BAO_ADDR
+%{ else ~}
+BAO_CACERT="/etc/openbao/tls/ca.pem"
+export BAO_ADDR BAO_CACERT
+%{ endif ~}
+
+# Token with sys/storage/raft/snapshot read capability
+# Created during post-init setup: see /etc/openbao/snapshot-token.env
+if [ ! -f /etc/openbao/snapshot-token.env ]; then
+  echo "SKIP: /etc/openbao/snapshot-token.env not found — run bao-snapshot-setup.sh first"
+  exit 0
+fi
+source /etc/openbao/snapshot-token.env
+export BAO_TOKEN
+
+OBS_PREFIX="snapshots"
+RETENTION_DAYS=14
+TIMESTAMP=$(date -u +%Y%m%dT%H%M%SZ)
+SNAP_FILE="/tmp/raft-snapshot-$${TIMESTAMP}.snap"
+
+echo "=== OpenBao Raft Snapshot Backup ==="
+echo "  Timestamp: $${TIMESTAMP}"
+
+if ! bao status -format=json 2>/dev/null | jq -e '.sealed == false' &>/dev/null; then
+  echo "  SKIP: OpenBao is sealed or unreachable"
+  exit 0
+fi
+
+# shellcheck source=/dev/null
+source /usr/local/lib/openbao/agency-creds.sh
+
+# The bastion connects via ELB; if the connected node is not the leader,
+# the request is automatically forwarded to the leader.
+echo "  Taking Raft snapshot..."
+bao operator raft snapshot save "$${SNAP_FILE}"
+SNAP_SIZE=$(stat -c%s "$${SNAP_FILE}" 2>/dev/null || stat -f%z "$${SNAP_FILE}")
+echo "  Snapshot size: $(( SNAP_SIZE / 1024 )) KB"
+
+OBS_KEY="$${OBS_PREFIX}/raft-snapshot-$${TIMESTAMP}.snap"
+echo "  Uploading to s3://$${OBS_BUCKET}/$${OBS_KEY} ..."
+aws s3 cp "$${SNAP_FILE}" "s3://$${OBS_BUCKET}/$${OBS_KEY}" \
+  --endpoint-url "https://obs.$${KMS_REGION}.otc.t-systems.com" \
+  --region "$${KMS_REGION}"
+
+rm -f "$${SNAP_FILE}"
+echo "  Upload complete."
+
+echo "  Cleaning up snapshots older than $${RETENTION_DAYS} days..."
+CUTOFF=$(date -u -d "$${RETENTION_DAYS} days ago" +%Y%m%dT%H%M%SZ 2>/dev/null || date -u -v-$${RETENTION_DAYS}d +%Y%m%dT%H%M%SZ)
+
+aws s3 ls "s3://$${OBS_BUCKET}/$${OBS_PREFIX}/" \
+  --endpoint-url "https://obs.$${KMS_REGION}.otc.t-systems.com" \
+  --region "$${KMS_REGION}" 2>/dev/null | \
+  grep 'raft-snapshot-' | awk '{print $4}' | while read -r KEY; do
+    # Extract timestamp from filename: raft-snapshot-20260312T120000Z.snap
+    TS=$(echo "$${KEY}" | sed 's/raft-snapshot-//;s/\.snap//')
+    if [[ "$${TS}" < "$${CUTOFF}" ]]; then
+      echo "    Deleting old snapshot: $${KEY}"
+      aws s3 rm "s3://$${OBS_BUCKET}/$${OBS_PREFIX}/$${KEY}" \
+        --endpoint-url "https://obs.$${KMS_REGION}.otc.t-systems.com" \
+        --region "$${KMS_REGION}"
+    fi
+  done
+
+echo "  Backup complete."
+SNAPEOF
+chmod 755 /usr/local/bin/bao-snapshot.sh
+
+cat > /usr/local/bin/bao-snapshot-setup.sh <<'SETUPEOF'
+#!/bin/bash
+set -euo pipefail
+
+BAO_ADDR="https://${fqdn}:8200"
+%{ if enable_letsencrypt ~}
+export BAO_ADDR
+%{ else ~}
+BAO_CACERT="/etc/openbao/tls/ca.pem"
+export BAO_ADDR BAO_CACERT
+%{ endif ~}
+
+if [ -z "$${BAO_TOKEN:-}" ]; then
+  echo "ERROR: BAO_TOKEN must be set (root or admin token)"
+  echo "Usage: BAO_TOKEN=s.xxxxx bao-snapshot-setup.sh"
+  exit 1
+fi
+export BAO_TOKEN
+
+echo "=== Setting up OpenBao Snapshot Backup ==="
+
+# Create snapshot policy (read-only snapshot access)
+echo '  Creating snapshot policy...'
+bao policy write snapshot-backup - <<'POLICY'
+path "sys/storage/raft/snapshot" {
+  capabilities = ["read"]
+}
+POLICY
+
+# Create a periodic orphan token (auto-renews, no parent dependency)
+echo '  Creating periodic token (period=768h / 32 days)...'
+TOKEN_JSON=$(bao token create \
+  -policy=snapshot-backup \
+  -period=768h \
+  -orphan \
+  -display-name="snapshot-backup" \
+  -format=json)
+
+TOKEN=$(echo "$${TOKEN_JSON}" | jq -r '.auth.client_token')
+
+# Store token securely
+echo "BAO_TOKEN=$${TOKEN}" > /etc/openbao/snapshot-token.env
+chmod 600 /etc/openbao/snapshot-token.env
+chown root:root /etc/openbao/snapshot-token.env
+
+# Encrypt token with KMS and upload to OBS
+source /etc/openbao/auto-unseal.env
+TOKEN_B64=$(echo -n "$${TOKEN}" | base64 -w0)
+CIPHER=$(/usr/local/bin/openbao-kms.py encrypt "$${KMS_KEY_ID}" "$${TOKEN_B64}")
+
+# shellcheck source=/dev/null
+source /usr/local/lib/openbao/agency-creds.sh
+
+CIPHER_FILE=$(mktemp)
+echo "$${CIPHER}" > "$${CIPHER_FILE}"
+aws s3 cp "$${CIPHER_FILE}" \
+  "s3://$${OBS_BUCKET}/config/snapshot-token.enc" \
+  --endpoint-url "https://obs.$${KMS_REGION}.otc.t-systems.com" \
+  --region "$${KMS_REGION}" --quiet
+rm -f "$${CIPHER_FILE}"
+echo "  Token encrypted with KMS and backed up to OBS (config/snapshot-token.enc)"
+
+echo "  Token stored in /etc/openbao/snapshot-token.env"
+echo "  Period: 768h (auto-renews on use, no expiry as long as used within period)"
+echo ""
+echo "  Backup will run automatically every 6 hours via /etc/cron.d/bao-snapshot"
+echo "  Manual run: sudo bao-snapshot.sh"
+SETUPEOF
+chmod 755 /usr/local/bin/bao-snapshot-setup.sh
+
+cat > /etc/cron.d/bao-snapshot <<'CRONEOF'
+# OpenBao Raft snapshot backup — every 6 hours with random delay up to 10 min
+23 */6 * * * root perl -e 'sleep int(rand(600))' && /usr/local/bin/bao-snapshot.sh 2>&1 | logger -t bao-snapshot
+CRONEOF
+chmod 644 /etc/cron.d/bao-snapshot
+
+cat > /usr/local/bin/bao-snapshot-token-restore.sh <<'TOKRESTEOF'
+#!/bin/bash
+set -euo pipefail
+
+if [ -f /etc/openbao/snapshot-token.env ]; then
+  exit 0
+fi
+
+source /etc/openbao/auto-unseal.env
+
+# shellcheck source=/dev/null
+source /usr/local/lib/openbao/agency-creds.sh
+
+OBS_ENDPOINT="https://obs.$${KMS_REGION}.otc.t-systems.com"
+
+CIPHER=$(aws s3 cp "s3://$${OBS_BUCKET}/config/snapshot-token.enc" - \
+  --endpoint-url "$${OBS_ENDPOINT}" --region "$${KMS_REGION}" 2>/dev/null) || {
+  echo "No snapshot token found in OBS — run bao-snapshot-setup.sh after init"
+  exit 0
+}
+
+TOKEN=$(/usr/local/bin/openbao-kms.py decrypt "" "$${CIPHER}" | base64 -d)
+echo "BAO_TOKEN=$${TOKEN}" > /etc/openbao/snapshot-token.env
+chmod 600 /etc/openbao/snapshot-token.env
+chown root:root /etc/openbao/snapshot-token.env
+echo "Snapshot token restored from OBS (KMS-decrypted)"
+TOKRESTEOF
+chmod 700 /usr/local/bin/bao-snapshot-token-restore.sh
+
+# Systemd service to restore snapshot token on boot
+cat > /etc/systemd/system/bao-snapshot-token.service <<'SVCEOF'
+[Unit]
+Description=Restore OpenBao snapshot token from OBS
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=!/etc/openbao/snapshot-token.env
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/bao-snapshot-token-restore.sh
+StandardOutput=journal
+StandardError=journal
+SVCEOF
+
+cat > /etc/systemd/system/bao-snapshot-token.timer <<'TMREOF'
+[Unit]
+Description=Trigger snapshot token restore shortly after boot
+
+[Timer]
+OnBootSec=20s
+Unit=bao-snapshot-token.service
+
+[Install]
+WantedBy=timers.target
+TMREOF
+
+systemctl daemon-reload
+systemctl enable --now bao-snapshot-token.timer
+
+aws s3 cp "s3://${obs_bucket}/scripts/bao-restore.sh" /usr/local/bin/bao-restore.sh \
+  --endpoint-url "$OBS_ENDPOINT" --region "${obs_region}"
+chmod 700 /usr/local/bin/bao-restore.sh
+
+%{ if enable_letsencrypt ~}
+
+# Let's Encrypt — certbot + OTC DNS-01 challenge
+
+apt-get install -y -qq certbot python3-certbot
+
+cat > /etc/openbao/letsencrypt.env <<'LEEOF'
+LE_DOMAIN=${letsencrypt_domain}
+LE_EMAIL=${letsencrypt_email}
+LE_DNS_ZONE_ID=${le_dns_zone_id}
+LE_DNS_REGION=${kms_region}
+LEEOF
+chmod 600 /etc/openbao/letsencrypt.env
+
+aws s3 cp "s3://${obs_bucket}/scripts/otc-dns.py" /usr/local/bin/otc-dns.py \
+  --endpoint-url "$OBS_ENDPOINT" --region "${obs_region}"
+chmod 700 /usr/local/bin/otc-dns.py
+
+# DNS helper calls require instance credentials from the ECS metadata service.
+cat > /usr/local/bin/otc-dns-auth.sh <<'AUTHEOF'
+#!/bin/bash
+set -euo pipefail
+# shellcheck source=/dev/null
+source /usr/local/lib/openbao/agency-creds.sh
+exec python3 /usr/local/bin/otc-dns.py "$@"
+AUTHEOF
+chmod 700 /usr/local/bin/otc-dns-auth.sh
+
+cat > /usr/local/bin/certbot-otc-auth.sh <<'AUTHEOF'
+#!/bin/bash
+set -euo pipefail
+source /etc/openbao/letsencrypt.env
+/usr/local/bin/otc-dns-auth.sh create \
+  "$LE_DNS_ZONE_ID" \
+  "_acme-challenge.$CERTBOT_DOMAIN" \
+  "$CERTBOT_VALIDATION" \
+  "$LE_DNS_REGION"
+echo "Waiting 60s for DNS propagation..."
+sleep 60
+AUTHEOF
+chmod 700 /usr/local/bin/certbot-otc-auth.sh
+
+cat > /usr/local/bin/certbot-otc-cleanup.sh <<'CLEANEOF'
+#!/bin/bash
+set -euo pipefail
+source /etc/openbao/letsencrypt.env
+/usr/local/bin/otc-dns-auth.sh delete \
+  "$LE_DNS_ZONE_ID" \
+  "_acme-challenge.$CERTBOT_DOMAIN" \
+  "$LE_DNS_REGION"
+CLEANEOF
+chmod 700 /usr/local/bin/certbot-otc-cleanup.sh
+
+cat > /usr/local/bin/bao-cert.sh <<'CERTEOF'
+#!/bin/bash
+set -euo pipefail
+
+source /etc/openbao/auto-unseal.env
+source /etc/openbao/letsencrypt.env
+
+DOMAIN="$${LE_DOMAIN}"
+OBS_PREFIX="certs/$${DOMAIN}"
+
+echo "=== Let's Encrypt Certificate Management ==="
+echo ""
+
+# Step 1: Obtain certificate via DNS-01 challenge
+echo "Requesting certificate for $${DOMAIN}..."
+certbot certonly \
+  --manual \
+  --preferred-challenges dns \
+  --manual-auth-hook /usr/local/bin/certbot-otc-auth.sh \
+  --manual-cleanup-hook /usr/local/bin/certbot-otc-cleanup.sh \
+  --domain "$${DOMAIN}" \
+  --agree-tos \
+  --email "$${LE_EMAIL}" \
+  --non-interactive
+
+echo ""
+echo "Certificate obtained!"
+echo ""
+
+# Step 2: Upload to OBS (bucket has SSE-KMS — encrypted at rest)
+/usr/local/bin/bao-cert-upload.sh
+
+echo ""
+echo "=== Certificate stored in OBS (SSE-KMS encrypted) ==="
+echo "Bucket: $${OBS_BUCKET}"
+echo "Path:   $${OBS_PREFIX}/"
+echo ""
+echo "Renewal: daily via cronjob (certbot renew + auto-upload to OBS)"
+echo "Download: bao-cert-download.sh [output_dir]"
+CERTEOF
+chmod 700 /usr/local/bin/bao-cert.sh
+
+cat > /usr/local/bin/bao-cert-download.sh <<'DLEOF'
+#!/bin/bash
+set -euo pipefail
+
+source /etc/openbao/auto-unseal.env
+source /etc/openbao/letsencrypt.env
+
+DOMAIN="$${LE_DOMAIN}"
+OBS_PREFIX="certs/$${DOMAIN}"
+OUTPUT_DIR="$${1:-/tmp/certs}"
+
+echo "=== Downloading Certificates from OBS ==="
+mkdir -p "$${OUTPUT_DIR}"
+
+# shellcheck source=/dev/null
+source /usr/local/lib/openbao/agency-creds.sh
+
+for FILE in cert.pem privkey.pem chain.pem fullchain.pem; do
+  if aws s3 cp "s3://$${OBS_BUCKET}/$${OBS_PREFIX}/$${FILE}" "$${OUTPUT_DIR}/$${FILE}" \
+    --endpoint-url "https://obs.$${KMS_REGION}.otc.t-systems.com" \
+    --region "$${KMS_REGION}" 2>/dev/null; then
+    echo "  Downloaded: $${OUTPUT_DIR}/$${FILE}"
+  fi
+done
+
+chmod 600 "$${OUTPUT_DIR}"/*.pem 2>/dev/null || true
+echo ""
+echo "Certificates saved to: $${OUTPUT_DIR}/"
+DLEOF
+chmod 700 /usr/local/bin/bao-cert-download.sh
+
+cat > /usr/local/bin/bao-cert-upload.sh <<'UPLOADEOF'
+#!/bin/bash
+set -euo pipefail
+
+source /etc/openbao/auto-unseal.env
+source /etc/openbao/letsencrypt.env
+
+DOMAIN="$${LE_DOMAIN}"
+CERT_DIR="/etc/letsencrypt/live/$${DOMAIN}"
+OBS_PREFIX="certs/$${DOMAIN}"
+
+if [ ! -d "$${CERT_DIR}" ]; then
+  echo "No certificate found for $${DOMAIN}" >&2
+  exit 1
+fi
+
+WORK_DIR=$(mktemp -d)
+trap 'rm -rf "$${WORK_DIR}"' EXIT
+
+# shellcheck source=/dev/null
+source /usr/local/lib/openbao/agency-creds.sh
+
+# Upload individual cert files for easy consumption
+for FILE in cert.pem privkey.pem chain.pem fullchain.pem; do
+  if [ -f "$${CERT_DIR}/$${FILE}" ]; then
+    # Resolve symlink — certbot live/ contains symlinks to archive/
+    REAL_FILE=$(readlink -f "$${CERT_DIR}/$${FILE}")
+    aws s3 cp "$${REAL_FILE}" "s3://$${OBS_BUCKET}/$${OBS_PREFIX}/$${FILE}" \
+      --endpoint-url "https://obs.$${KMS_REGION}.otc.t-systems.com" \
+      --region "$${KMS_REGION}" --quiet
+  fi
+done
+
+# Upload full certbot state (tar.gz) for restore on new bastion
+tar czf "$${WORK_DIR}/letsencrypt-state.tar.gz" -C / etc/letsencrypt
+aws s3 cp "$${WORK_DIR}/letsencrypt-state.tar.gz" \
+  "s3://$${OBS_BUCKET}/$${OBS_PREFIX}/letsencrypt-state.tar.gz" \
+  --endpoint-url "https://obs.$${KMS_REGION}.otc.t-systems.com" \
+  --region "$${KMS_REGION}" --quiet
+
+logger -t bao-cert "Certificate + certbot state for $${DOMAIN} uploaded to OBS"
+UPLOADEOF
+chmod 700 /usr/local/bin/bao-cert-upload.sh
+
+cat > /usr/local/bin/bao-cert-restore.sh <<'RESTEOF'
+#!/bin/bash
+set -euo pipefail
+
+source /etc/openbao/auto-unseal.env
+source /etc/openbao/letsencrypt.env
+
+DOMAIN="$${LE_DOMAIN}"
+OBS_PREFIX="certs/$${DOMAIN}"
+
+WORK_DIR=$(mktemp -d)
+trap 'rm -rf "$${WORK_DIR}"' EXIT
+
+# shellcheck source=/dev/null
+source /usr/local/lib/openbao/agency-creds.sh
+
+if ! aws s3 cp "s3://$${OBS_BUCKET}/$${OBS_PREFIX}/letsencrypt-state.tar.gz" \
+  "$${WORK_DIR}/letsencrypt-state.tar.gz" \
+  --endpoint-url "https://obs.$${KMS_REGION}.otc.t-systems.com" \
+  --region "$${KMS_REGION}" 2>/dev/null; then
+  echo "No certbot state found in OBS — fresh setup required."
+  exit 1
+fi
+
+tar xzf "$${WORK_DIR}/letsencrypt-state.tar.gz" -C /
+
+logger -t bao-cert "Certbot state for $${DOMAIN} restored from OBS"
+echo "Certbot state restored. Existing certificate and renewal config are in place."
+RESTEOF
+chmod 700 /usr/local/bin/bao-cert-restore.sh
+
+mkdir -p /etc/letsencrypt/renewal-hooks/deploy
+cat > /etc/letsencrypt/renewal-hooks/deploy/obs-upload.sh <<'HOOKEOF'
+#!/bin/bash
+/usr/local/bin/bao-cert-upload.sh
+HOOKEOF
+chmod 700 /etc/letsencrypt/renewal-hooks/deploy/obs-upload.sh
+
+# Prevent default certbot cronjob from being (re)installed by apt
+dpkg-divert --local --rename --divert /etc/cron.d/certbot.disabled --add /etc/cron.d/certbot
+rm -f /etc/cron.d/certbot
+
+cat > /etc/cron.d/certbot-renew <<'CRONEOF'
+# Let's Encrypt renewal — daily at 03:17 with random delay up to 1h
+17 3 * * * root perl -e 'sleep int(rand(3600))' && certbot renew --quiet --deploy-hook /usr/local/bin/bao-cert-upload.sh 2>&1 | logger -t bao-cert
+CRONEOF
+chmod 644 /etc/cron.d/certbot-renew
+
+cat > /etc/systemd/system/bao-cert-init.service <<'SVCEOF'
+[Unit]
+Description=Restore or issue Let's Encrypt certificate
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=!/etc/letsencrypt/renewal/${letsencrypt_domain}.conf
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash -c '/usr/local/bin/bao-cert-restore.sh || /usr/local/bin/bao-cert.sh'
+StandardOutput=journal
+StandardError=journal
+SVCEOF
+
+cat > /etc/systemd/system/bao-cert-init.timer <<'TMREOF'
+[Unit]
+Description=Trigger initial cert setup shortly after boot
+
+[Timer]
+OnBootSec=30s
+Unit=bao-cert-init.service
+
+[Install]
+WantedBy=timers.target
+TMREOF
+
+systemctl daemon-reload
+systemctl enable --now bao-cert-init.timer
+%{ endif ~}
+
+# fail2ban for SSH brute-force protection
+apt-get install -y -qq fail2ban
+
+cat > /etc/fail2ban/jail.local <<'F2BEOF'
+[sshd]
+enabled  = true
+port     = ssh
+filter   = sshd
+backend  = systemd
+maxretry = 5
+bantime  = 3600
+findtime = 600
+F2BEOF
+
+systemctl enable --now fail2ban
+
+%{ if enable_lts_logging ~}
+# LTS ICAgent
+mkdir -p /opt/cloud/lts
+chmod 750 /opt/cloud/lts
+echo "${name_prefix}-openbao-bastion" > /opt/cloud/lts/custom_tag
+chmod 640 /opt/cloud/lts/custom_tag
+
+cd /tmp
+curl -fsSL "https://icagent-${lts_region}.obs.${lts_region}.otc.t-systems.com/ICAgent_linux/apm_agent_install.sh" -o apm_agent_install.sh
+REGION=${lts_region} bash apm_agent_install.sh -accessip lts-access.${lts_region}.otc.t-systems.com -obsdomain obs.${lts_region}.otc.t-systems.com || echo "WARNING: ICAgent install failed"
+rm -f apm_agent_install.sh
+%{ endif ~}

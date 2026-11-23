@@ -1,0 +1,13 @@
+diffusers==0.43.0
+transformers==5.23.0
+accelerate==1.16.0
+safetensors==0.8.0
+fastapi==0.165.0
+uvicorn==0.54.0
+python-multipart==0.0.34
+nvidia-ml-py==13.615.71
+soundfile==0.14.0
+pillow==13.0.0
+# Florence-2 (vision) remote code imports einops and timm
+einops==0.8.2
+timm==1.0.31

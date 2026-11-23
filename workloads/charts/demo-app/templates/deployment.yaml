@@ -1,0 +1,85 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: demo-app
+  template:
+    metadata:
+      labels:
+        app: demo-app
+      {{ if or (eq .Values.accessMode "agent") (eq .Values.accessMode "both") }}
+      annotations:
+        # The OpenBao chart ships the vault-k8s injector, which only reads vault.hashicorp.com/* keys.
+        vault.hashicorp.com/agent-inject: "true"
+        vault.hashicorp.com/role: {{ .Values.baoRole | quote }}
+        vault.hashicorp.com/agent-inject-secret-config: {{ .Values.secretPath | quote }}
+        vault.hashicorp.com/template-static-secret-render-interval: "{{ .Values.renderInterval }}s"
+        # JSON keeps any value intact (multi-line, "=", quotes).
+        vault.hashicorp.com/agent-inject-template-config: |
+          {{`{{- with secret `}}"{{ .Values.secretPath }}"{{` -}}{{ .Data.data | toJSON }}{{- end -}}`}}
+      {{ end }}
+    spec:
+      serviceAccountName: demo-app
+      imagePullSecrets:
+        - name: default-secret
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: demo-app
+          image: {{ .Values.image | quote }}
+          securityContext:
+            runAsUser: 10001
+            runAsGroup: 10001
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            {{- if .Values.baoCaCert }}
+            - name: bao-ca
+              mountPath: /etc/openbao-ca
+              readOnly: true
+            {{- end }}
+          env:
+            - name: BAO_ADDR
+              value: {{ .Values.baoAddr | quote }}
+            {{- if .Values.baoCaCert }}
+            - name: REQUESTS_CA_BUNDLE
+              value: /etc/openbao-ca/ca.pem
+            {{- end }}
+            - name: BAO_ACCESS_MODE
+              value: {{ .Values.accessMode | quote }}
+            - name: BAO_ROLE
+              value: {{ .Values.baoRole | quote }}
+            - name: BAO_SECRET_PATH
+              value: {{ trimPrefix "kv/data/" .Values.secretPath | quote }}
+            - name: BAO_RENDER_INTERVAL
+              value: {{ .Values.renderInterval | quote }}
+          ports:
+            - containerPort: 5000
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 5000
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 5000
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        {{- if .Values.baoCaCert }}
+        - name: bao-ca
+          configMap:
+            name: demo-app-bao-ca
+        {{- end }}

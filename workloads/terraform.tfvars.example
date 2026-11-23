@@ -1,0 +1,29 @@
+# Example variable file — not read by OpenTofu. All configuration lives in
+# envs/<env>.tfvars (-var-file=envs/dev.tfvars).
+
+# Feature flags
+environment          = "dev"
+create_podinfo       = true
+create_openbao       = false # in-cluster parts for infra's openbao_mode (cce: server + injector, vm: injector)
+create_demo_app      = false
+demo_app_access_mode = "both"
+
+# Versions
+cert_manager_version  = "v1.21.3"
+podinfo_version       = "6.17.0"
+openbao_chart_version = "0.30.8"
+
+# OpenBao
+openbao_replicas     = 3
+openbao_hostname     = "openbao"
+openbao_storage_size = "10Gi"
+
+# Demo App
+demo_app_hostname = "demo" # prepended to the infra DNS zone
+
+# GPU Demo (needs a node pool with gpu = true in infra node_pools)
+create_gpu_demo   = false
+gpu_demo_hostname = "aidemo"
+gpu_demo_replicas = 1 # 0 = scale GPU node to zero
+# gpu_demo_models  = { chat = "Qwen/Qwen2.5-7B-Instruct" } # per tab: image, chat, stt, vision
+# gpu_demo_openbao = true # HF token from OpenBao (scripts/gpu-demo-openbao-setup.sh)

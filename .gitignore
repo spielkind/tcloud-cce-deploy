@@ -10,6 +10,9 @@ override.tf.json
 *_override.tf
 *_override.tf.json
 *.auto.tfvars
+*.auto.tfvars.json
+infra/terraform.tfvars
+workloads/terraform.tfvars
 
 # Secrets
 *.pem
@@ -28,9 +31,10 @@ Thumbs.db
 *.swo
 .envrc
 terraform/.terraform.lock.hcl
-apps/.terraform.lock.hcl
+workloads/.terraform.lock.hcl
 bootstrap/.terraform.lock.hcl
 .kubeconfig
 infra/.terraform.lock.hcl
 *.keys
 *.keys.*
+__pycache__/

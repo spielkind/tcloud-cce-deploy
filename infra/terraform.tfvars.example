@@ -1,0 +1,130 @@
+# =============================================================================
+# Example variable file — documents every input with its default.
+# Not read by OpenTofu — all configuration lives in envs/<env>.tfvars
+# (-var-file=envs/dev.tfvars).
+# Secrets are NEVER put here; export them instead:
+#   TF_VAR_otc_access_key, TF_VAR_otc_secret_key, TF_VAR_otc_domain_name,
+#   TF_VAR_otc_project_name (e.g. eu-de_myproject, no default)
+# =============================================================================
+
+# --- General ---
+environment = "dev"        # dev | prod; merged into tags as environment=<value>
+name_prefix = "tcloud-dev" # prefix of all resource names (changing recreates everything)
+region      = "eu-de"
+# availability_zones = ["eu-de-01", "eu-de-02", "eu-de-03"]
+# tags = { managed_by = "opentofu", project = "tcloud-cce-reference" }
+
+# --- IAM agencies (domain-wide singletons) ---
+# reuse_existing_cce_agency     = false # true if cce_admin_trust already exists
+# reuse_existing_evs_kms_agency = false # true if EVSAccessKMS already exists
+
+# --- Network ---
+vpc_cidr        = "10.248.0.0/16"
+subnet_cidr     = "10.248.0.0/24"   # nodes; empty = <vpc_cidr>/24 at offset 1
+eni_subnet_cidr = "10.248.128.0/18" # pod ENIs (Turbo only), must be inside vpc_cidr
+# container_cidr = "172.16.0.0/16"  # pod CIDR for overlay_l2/vpc-router
+# service_cidr   = "10.247.0.0/16"  # Kubernetes service CIDR
+# vpc_dns_list   = ["100.125.4.25", "100.125.129.199"]
+# nat_spec          = "1" # 1 small | 2 medium | 3 large | 4 extra-large
+# nat_eip_bandwidth = 100 # Mbit/s
+
+# --- Worker access / security group ---
+# bastion_cidrs          = []    # SSH to workers (empty = no SSH)
+# nodeport_cidrs         = []    # empty = vpc_cidr (+ 0.0.0.0/0 for ingress on non-eni clusters)
+# expose_node_http_ports = false # open 80/443 on nodes (hostNetwork/hostPort only)
+# ssh_public_key         = ""    # empty = generate RSA 4096 key (output ssh_private_key_pem)
+
+# --- CCE cluster ---
+cluster_version        = "v1.35"
+cluster_flavor         = "cce.s2.small" # s1 = single master, s2 = HA
+container_network_type = "eni"          # overlay_l2 | vpc-router | eni (Turbo)
+high_availability      = true
+kube_proxy_mode        = "ipvs" # iptables | ipvs
+# cluster_type           = "VirtualMachine"
+# bind_api_eip           = false # public API EIP (required by create_workload_identity)
+# api_eip_bandwidth      = 10
+# api_access_trustlist   = []    # CIDRs allowed to reach the API (empty = unrestricted)
+# component_configurations = { "kube-apiserver" = { "support-overload" = "true" } }
+# master_volume_encryption = false # recreates the cluster when changed
+# delete_all_storage       = true  # delete cluster-created storage on destroy
+# delete_all_network       = true  # delete cluster-created ELBs/ENIs on destroy
+# cluster_create_timeout   = "60m"
+# cluster_delete_timeout   = "60m"
+
+# --- Node pools ---
+# Defaults for all pools (each pool can override os/runtime/volume types):
+# node_os                = "HCE OS 2.0"
+# node_runtime           = "containerd"
+# node_root_volume_type  = "SSD"    # SATA | SAS | SSD | GPSSD | ESSD
+# node_data_volume_type  = "SSD"
+# node_volume_encryption = true     # KMS key with yearly rotation + EVSAccessKMS agency
+#
+# Pool name = <name_prefix>-<key>. All attributes except flavor are optional:
+#   count (1) | autoscaling (false) | min_count (1, gpu: 0) | max_count (2 x count)
+#   az ("random" or e.g. "eu-de-01") | os | runtime | root_volume_size (50)
+#   root_volume_type | data_volume_size (100) | data_volume_type
+#   priority (1, gpu: 0) | scale_down_cooldown (15 min)
+#   gpu (false) | labels ({}, gpu: {accelerator = "nvidia"})
+#   taints ([], gpu: [{key = "nvidia.com/gpu", value = "present", effect = "NoSchedule"}])
+# Any autoscaling pool installs the cluster autoscaler; any gpu pool installs the
+# CCE AI Suite (NVIDIA GPU) addon. Turbo (eni): CPU s7n/c7n/m7n/c3n, GPU g7/pi5e/p5e.
+node_pools = {
+  workers = {
+    flavor = "s7n.xlarge.2"
+    count  = 3
+  }
+  # gpu = {
+  #   flavor           = "pi5e.2xlarge.4" # 1x NVIDIA L4 24 GB
+  #   gpu              = true
+  #   autoscaling      = true
+  #   min_count        = 0
+  #   max_count        = 1
+  #   az               = "eu-de-01"
+  #   root_volume_size = 100
+  # }
+  # batch = {
+  #   flavor      = "c7n.2xlarge.2"
+  #   autoscaling = true
+  #   min_count   = 0
+  #   max_count   = 5
+  #   labels      = { workload = "batch" }
+  #   taints      = [{ key = "workload", value = "batch", effect = "NoSchedule" }]
+  # }
+}
+
+# --- GPU addon (used when a pool has gpu = true) ---
+# gpu_addon_version = "2.15.6"         # or "latest"
+# nvidia_driver_url = "https://us.download.nvidia.com/tesla/580.196.07/NVIDIA-Linux-x86_64-580.196.07.run"
+
+# --- Addons (versions accept "latest" = newest template for cluster_version) ---
+# autoscaler_version     = "1.35.8"
+# create_metrics_server  = true
+# metrics_server_version = "1.3.132"
+# log_agent_version      = "1.7.10"
+
+# --- Ingress (nginx-ingress addon + shared ELB) ---
+create_ingress = false
+# nginx_ingress_version        = "6.0.24"
+# nginx_ingress_controller_tag = "v1.14.5_6.0.24" # must end with _<addon version>
+# ingress_eip_bandwidth        = 100
+# ingress_preserve_client_ip   = true # externalTrafficPolicy Local
+
+# --- DNS ---
+create_dns    = false
+dns_zone_name = "tcloud.example.invalid." # trailing dot required
+# dns_zone_type = "public"                # public | private
+
+# --- Logging (LTS) ---
+create_lts = false
+# lts_ttl_days = 7
+
+# --- Audit (CTS) ---
+# create_cts_tracker = false # one system tracker per project
+# cts_retention_days = 365
+# cts_lts_enabled    = false
+
+# --- OpenBao / workload identity ---
+openbao_mode = "disabled" # disabled | cce | vm
+# create_openbao_unseal    = false # cce mode: KMS + OBS + FunctionGraph auto-unseal
+# create_workload_identity = false # requires bind_api_eip = true
+# openbao_vm = { ... }             # vm mode, see variables.tf for the full object

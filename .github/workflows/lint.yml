@@ -16,7 +16,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        dir: [bootstrap, infra, apps]
+        dir: [bootstrap, infra, workloads]
     steps:
       - uses: actions/checkout@v7
 
@@ -42,9 +42,11 @@ jobs:
 
       - name: Lint
         run: |
-          helm lint apps/charts/cluster-issuer
-          helm lint apps/charts/demo-app --set image=example,hostname=example.org
-          helm lint apps/charts/gpu-demo --set image=example,hostname=example.org
+          helm lint workloads/charts/cluster-issuer
+          helm lint workloads/charts/demo-app --set image=example,hostname=example.org,accessMode=both
+          helm lint workloads/charts/demo-app --set image=example,hostname=example.org,accessMode=api
+          helm lint workloads/charts/demo-app --set image=example,hostname=example.org,accessMode=agent
+          helm lint workloads/charts/gpu-demo --set image=example,hostname=example.org
 
   scripts:
     name: Scripts and workflows
@@ -53,10 +55,10 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: ShellCheck
-        run: shellcheck scripts/*.sh
+        run: shellcheck scripts/*.sh infra/modules/openbao/files/*.sh
 
       - name: Ruff
-        run: pipx run ruff==0.17.6 check --isolated --select E,F,W --line-length 140 scripts apps/demo-app apps/gpu-demo infra/modules/openbao-unseal/function
+        run: pipx run ruff==0.17.6 check --isolated --select E,F,W --line-length 140 scripts workloads/demo-app workloads/gpu-demo infra/modules/openbao-unseal/function infra/modules/openbao/files
 
       - name: actionlint
         run: |
