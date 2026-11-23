@@ -94,6 +94,8 @@ node_pools = {
 
 # --- GPU addon (used when a pool has gpu = true) ---
 # gpu_addon_version = "2.15.6"         # or "latest"
+# gpu_xgpu          = false            # GPU slicing: CCE xGPU + Volcano scheduler (docs/gpu.md#gpu-slicing)
+# volcano_version   = "1.22.5"         # or "latest"
 # nvidia_driver_url = "https://us.download.nvidia.com/tesla/580.196.07/NVIDIA-Linux-x86_64-580.196.07.run"
 
 # --- Addons (versions accept "latest" = newest template for cluster_version) ---

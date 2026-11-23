@@ -23,12 +23,35 @@ tolerations:
   - key: nvidia.com/gpu
     operator: Exists
     effect: NoSchedule
+# CPU/RAM only; the GPU (whole card or xGPU slice) is added by the templates.
 resources:
   requests:
     cpu: "2"
     memory: 12Gi
-    nvidia.com/gpu: 1
   limits:
     cpu: "6"
     memory: 28Gi
-    nvidia.com/gpu: 1
+# GPU slicing (CCE xGPU + Volcano): playground and workers share one GPU with hard
+# VRAM (memGib, multiple of 0.125) and compute (corePercent) limits.
+slicing:
+  enabled: false
+  playground:
+    memGib: 13
+    corePercent: 50
+  workers:
+    - name: small
+      memGib: 2
+      corePercent: 10
+    - name: medium
+      memGib: 3
+      corePercent: 15
+    - name: large
+      memGib: 4
+      corePercent: 25
+  workerResources:
+    requests:
+      cpu: 200m
+      memory: 1Gi
+    limits:
+      cpu: "1"
+      memory: 4Gi

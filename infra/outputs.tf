@@ -170,6 +170,11 @@ output "gpu_node_pool_enabled" {
   value       = module.cce.gpu_enabled
 }
 
+output "gpu_xgpu_enabled" {
+  description = "True if GPU slicing (CCE xGPU + Volcano) is enabled; workloads use it as gpu_slicing default"
+  value       = module.cce.xgpu_enabled
+}
+
 output "gpu_node_selector" {
   description = "nodeSelector for GPU workloads (labels of the first GPU pool)"
   value       = module.cce.gpu_node_selector

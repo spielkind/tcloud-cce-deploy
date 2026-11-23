@@ -40,7 +40,7 @@ Further documentation (index: [docs/README.md](docs/README.md), diagrams in [doc
 | Auto-unseal with FunctionGraph + KMS (cce mode) | [docs/openbao-unseal.md](docs/openbao-unseal.md) |
 | Workload identity (OIDC, no AK/SK in pods) | [docs/workload-identity.md](docs/workload-identity.md) |
 | OpenBao demo app (both modes) | [docs/demo-app.md](docs/demo-app.md) |
-| GPU node pool + GPU AI playground (image, chat, speech, vision) | [docs/gpu.md](docs/gpu.md) |
+| GPU node pool + GPU AI playground (image, chat, speech, vision) + GPU slicing (xGPU) | [docs/gpu.md](docs/gpu.md) |
 
 ---
 
@@ -75,7 +75,8 @@ Further documentation (index: [docs/README.md](docs/README.md), diagrams in [doc
 │       │   ├── addon-versions.tf  #   addon template lookup ("latest" resolution)
 │       │   ├── metrics-server.tf  #   metrics-server addon
 │       │   ├── autoscaler.tf      #   autoscaler addon
-│       │   ├── gpu-addon.tf       #   CCE AI Suite (NVIDIA GPU) addon
+│       │   ├── gpu-addon.tf       #   CCE AI Suite (NVIDIA GPU) addon (xGPU optional)
+│       │   ├── volcano.tf         #   Volcano scheduler addon (GPU slicing)
 │       │   ├── ingress.tf         #   shared ELB + EIP, nginx-ingress addon, wildcard DNS
 │       │   ├── lts.tf             #   LTS group + streams
 │       │   ├── log-agent.tf       #   log-agent addon
@@ -95,7 +96,7 @@ Further documentation (index: [docs/README.md](docs/README.md), diagrams in [doc
 │   ├── podinfo.tf                 # hello world (hello.<zone>)
 │   ├── openbao.tf                 # cce: OpenBao HA + injector; vm: injector + token reviewer
 │   ├── demo-app.tf                # OpenBao demo app (both modes)
-│   ├── gpu-demo.tf                # GPU AI playground (image, chat, speech, vision)
+│   ├── gpu-demo.tf                # GPU AI playground (image, chat, speech, vision, optional slicing)
 │   ├── logging.tf                 # log-agent LogConfigs for node log files
 │   ├── charts/                    # cluster-issuer, demo-app, gpu-demo
 │   ├── demo-app/                  # demo app source (Flask)
@@ -531,6 +532,8 @@ node_pools = {
 |---|---|---|
 | `gpu_addon_version` | `2.15.6` | `gpu-beta` addon version or `"latest"` (used when a pool has `gpu = true`) |
 | `nvidia_driver_url` | `…/tesla/580.196.07/NVIDIA-Linux-x86_64-580.196.07.run` | NVIDIA driver installed on GPU nodes |
+| `gpu_xgpu` | `false` | GPU slicing: CCE xGPU in the GPU addon + Volcano scheduler ([gpu.md](docs/gpu.md#gpu-slicing)) |
+| `volcano_version` | `1.22.5` | Volcano addon version or `"latest"` (only with `gpu_xgpu = true`) |
 
 **Addons, ingress, DNS, logging**
 
@@ -597,6 +600,7 @@ Every `*_version` addon variable accepts a pinned version or `"latest"`, which r
 | `gpu_demo_replicas` | `1` | `0` lets the autoscaler remove the GPU node |
 | `gpu_demo_models` | image `stabilityai/sdxl-turbo`, chat `Qwen/Qwen2.5-3B-Instruct`, stt `openai/whisper-large-v3-turbo`, vision `florence-community/Florence-2-base` | Hugging Face model per tab ([gpu.md](docs/gpu.md)) |
 | `gpu_demo_openbao` | `true` | Inject the Hugging Face token from OpenBao (`scripts/gpu-demo-openbao-setup.sh`) |
+| `gpu_slicing` | follows infra `gpu_xgpu`; playground 13 GiB/50 %, workers small/medium/large | xGPU slices for the playground and slice workers ([gpu.md](docs/gpu.md#gpu-slicing)) |
 | `gpu_demo_image_tag` | `latest` | Set by CI to the commit SHA of the last build |
 
 ---

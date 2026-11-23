@@ -83,6 +83,11 @@ output "gpu_enabled" {
   value       = local.gpu_enabled
 }
 
+output "xgpu_enabled" {
+  description = "True if GPU slicing (xGPU + Volcano) is enabled"
+  value       = local.xgpu_enabled
+}
+
 output "gpu_node_selector" {
   description = "Kubernetes labels of the first GPU pool (for nodeSelector)"
   value       = local.gpu_enabled ? values(local.gpu_pools)[0].labels : {}

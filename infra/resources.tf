@@ -79,6 +79,8 @@ module "cce" {
   # Addons
   autoscaler_version           = var.autoscaler_version
   gpu_addon_version            = var.gpu_addon_version
+  gpu_xgpu                     = var.gpu_xgpu
+  volcano_version              = var.volcano_version
   nvidia_driver_url            = var.nvidia_driver_url
   create_metrics_server        = var.create_metrics_server
   metrics_server_version       = var.metrics_server_version

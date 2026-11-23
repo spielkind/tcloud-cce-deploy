@@ -7,6 +7,7 @@
 # =============================================================================
 locals {
   autoscaler_enabled = local.any_autoscaling
+  xgpu_enabled       = local.gpu_enabled && var.gpu_xgpu
 
   addon_enabled = {
     autoscaler     = local.autoscaler_enabled
@@ -14,6 +15,7 @@ locals {
     log-agent      = var.create_lts
     metrics-server = var.create_metrics_server
     nginx-ingress  = var.create_ingress
+    volcano        = local.xgpu_enabled
   }
 
   addon_requested_version = {
@@ -22,6 +24,7 @@ locals {
     log-agent      = var.log_agent_version
     metrics-server = var.metrics_server_version
     nginx-ingress  = var.nginx_ingress_version
+    volcano        = var.volcano_version
   }
 }
 

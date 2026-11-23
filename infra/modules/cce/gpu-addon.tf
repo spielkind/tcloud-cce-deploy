@@ -22,6 +22,7 @@ resource "opentelekomcloud_cce_addon_v3" "gpu" {
       compatible_with_legacy_api       = false
       component_schedulername          = "default-scheduler"
       enable_pod_eviction_on_gpu_error = false
+      enable_xgpu                      = local.xgpu_enabled
     })
     flavor_json = jsonencode({
       description = "custom-resources"

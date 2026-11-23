@@ -1,0 +1,88 @@
+{{- if .Values.slicing.enabled }}
+{{- range .Values.slicing.workers }}
+---
+# Slice worker: same image, no models; shows its xGPU slice, runs benchmarks and the OOM isolation test.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gpu-demo-slice-{{ .name }}
+  labels:
+    app: gpu-demo-slice
+    slice: {{ .name | quote }}
+spec:
+  replicas: {{ $.Values.replicas }}
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: gpu-demo-slice
+      slice: {{ .name | quote }}
+  template:
+    metadata:
+      labels:
+        app: gpu-demo-slice
+        slice: {{ .name | quote }}
+    spec:
+      schedulerName: volcano
+      automountServiceAccountToken: false
+      imagePullSecrets:
+        - name: default-secret
+      nodeSelector:
+        {{- toYaml $.Values.nodeSelector | nindent 8 }}
+      tolerations:
+        {{- toYaml $.Values.tolerations | nindent 8 }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: worker
+          image: {{ $.Values.image | quote }}
+          env:
+            - name: MODE
+              value: slice-worker
+            - name: PRELOAD
+              value: ""
+            {{- include "gpu-demo.sliceEnv" (dict "name" .name "slice" .) | nindent 12 }}
+          ports:
+            - containerPort: 8000
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            {{- include "gpu-demo.resources" (dict "resources" $.Values.slicing.workerResources "slicing" true "slice" .) | nindent 12 }}
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8000
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8000
+            periodSeconds: 20
+            failureThreshold: 6
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gpu-demo-slice-{{ .name }}
+spec:
+  selector:
+    app: gpu-demo-slice
+    slice: {{ .name | quote }}
+  ports:
+    - port: 8000
+      targetPort: 8000
+{{- end }}
+{{- end }}

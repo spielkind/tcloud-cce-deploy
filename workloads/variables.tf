@@ -138,6 +138,53 @@ variable "gpu_demo_openbao" {
   default     = true
 }
 
+variable "gpu_slicing" {
+  description = <<-EOT
+    GPU slicing showcase (needs gpu_xgpu = true in infra, docs/gpu.md#gpu-slicing). enabled = null follows infra.
+    The playground and each worker get a hard xGPU slice of the L4: mem_gib (multiple of 0.125) and core_percent.
+  EOT
+  type = object({
+    enabled = optional(bool)
+    playground = optional(object({
+      mem_gib      = number
+      core_percent = number
+    }), { mem_gib = 13, core_percent = 50 })
+    workers = optional(list(object({
+      name         = string
+      mem_gib      = number
+      core_percent = number
+      })), [
+      { name = "small", mem_gib = 2, core_percent = 10 },
+      { name = "medium", mem_gib = 3, core_percent = 15 },
+      { name = "large", mem_gib = 4, core_percent = 25 },
+    ])
+  })
+  default = {}
+
+  validation {
+    condition = alltrue([
+      for s in concat([var.gpu_slicing.playground], var.gpu_slicing.workers) :
+      s.mem_gib >= 1 && floor(s.mem_gib * 8) == s.mem_gib * 8 && s.core_percent >= 1 && s.core_percent <= 100 && floor(s.core_percent) == s.core_percent
+    ])
+    error_message = "Each slice needs mem_gib >= 1 (multiple of 0.125) and an integer core_percent between 1 and 100."
+  }
+
+  validation {
+    condition = (
+      sum(concat([var.gpu_slicing.playground.mem_gib], [for w in var.gpu_slicing.workers : w.mem_gib])) <= 22 &&
+      sum(concat([var.gpu_slicing.playground.core_percent], [for w in var.gpu_slicing.workers : w.core_percent])) <= 100
+    )
+    error_message = "All slices together must fit one L4: at most 22 GiB VRAM and 100 % compute."
+  }
+
+  validation {
+    condition = alltrue([for w in var.gpu_slicing.workers : can(regex("^[a-z0-9]([a-z0-9-]{0,18}[a-z0-9])?$", w.name))]) && (
+      length(distinct([for w in var.gpu_slicing.workers : w.name])) == length(var.gpu_slicing.workers)
+    )
+    error_message = "Worker names must be unique DNS labels (lowercase, max 20 characters)."
+  }
+}
+
 variable "gpu_demo_image_tag" {
   description = "GPU demo image tag in SWR (CI sets the commit SHA of the last image build)"
   type        = string

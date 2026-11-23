@@ -65,6 +65,10 @@ node_pools = {
   }
 }
 
+# GPU slicing (docs/gpu.md#gpu-slicing): xGPU in the GPU addon + Volcano.
+# Off: CCE xGPU does not support the L4 (pi5e) - tested, pods stay pending.
+gpu_xgpu = false
+
 # --- Addons ---
 create_metrics_server = true
 create_ingress        = true

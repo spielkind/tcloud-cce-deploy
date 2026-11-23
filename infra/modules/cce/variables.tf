@@ -266,6 +266,16 @@ variable "gpu_addon_version" {
   default = "2.15.6"
 }
 
+variable "gpu_xgpu" {
+  type    = bool
+  default = false
+}
+
+variable "volcano_version" {
+  type    = string
+  default = "1.22.5"
+}
+
 variable "nvidia_driver_url" { type = string }
 
 variable "create_metrics_server" {

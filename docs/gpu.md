@@ -12,6 +12,7 @@ An optional, autoscaling GPU node pool (a `node_pools` entry with `gpu = true`) 
 - [The Demo App](#the-demo-app)
   - [Hugging Face token](#hugging-face-token-optional-via-openbao)
   - [API](#api)
+- [GPU Slicing](#gpu-slicing)
 - [Troubleshooting](#troubleshooting)
 - [License](#license)
 
@@ -78,7 +79,7 @@ kubectl scale deployment gpu-demo --replicas=0   # stop GPU node
 kubectl scale deployment gpu-demo --replicas=1   # start GPU node
 ```
 
-(The next Deploy resets it to `gpu_demo_replicas`.)
+(The next Deploy resets it to `gpu_demo_replicas`.) With [GPU slicing](#gpu-slicing) the slice workers also run on the GPU node; `gpu_demo_replicas` scales them too, with kubectl scale them as well: `kubectl scale deployment -l app=gpu-demo-slice --replicas=0`.
 
 **Cold start:** new node (~3–5 min) + NVIDIA driver installation (~5 min) + model load. The first start downloads the model (~7 GB; all tabs ~17 GB) into the PVC `gpu-demo-models` (`csi-disk-topology`, 60 Gi); later starts load it from disk. The PVC is bound to the AZ of the first GPU node and is kept when the release is removed (`helm.sh/resource-policy: keep`).
 
@@ -94,6 +95,7 @@ One FastAPI app with tabs; all models share the single GPU:
 | Speech → Text | Whisper large-v3-turbo | microphone (HTTPS) or upload, language auto/de/en, transcribe/translate | ~2 GB |
 | Vision | Florence-2-base (native transformers port) | caption, detailed caption, OCR, object detection with boxes | ~1.5 GB |
 | GPU | — | live utilisation, VRAM, temperature, power; loaded models with load/unload; CPU-vs-GPU matmul benchmark | — |
+| GPU Slicing | — | only with [GPU slicing](#gpu-slicing): slices of the L4 per pod, parallel benchmark, isolation test; otherwise an explanation | — |
 
 **Model manager:** SDXL-Turbo is preloaded (`PRELOAD`); the other models load on first use (the tab shows *loading*, the API answers `409` meanwhile). Before a load the least-recently-used idle model is unloaded if free VRAM is short (SDXL-Turbo is kept longest). Only one GPU job runs at a time; a second request gets `429 GPU busy`. All four models fit together on the L4 (~20 GB).
 
@@ -126,6 +128,83 @@ curl -s $H/api/vision -F image=@photo.jpg -F task=ocr | jq -r .text
 curl -s $H/api/gpu | jq '.gpu'
 ```
 
+## GPU Slicing
+
+![GPU slicing with CCE xGPU](diagrams/gpu-slicing.svg)
+
+GPU slicing shares one physical GPU between several pods. The options:
+
+| Option | Isolation | On this setup |
+|---|---|---|
+| Whole GPU (`nvidia.com/gpu: 1`) | full card per pod | default |
+| Time-slicing (NVIDIA device plugin) | none — pods take turns, no VRAM or fault isolation | not offered by the CCE addon |
+| MIG (Multi-Instance GPU) | hardware partitions | A100/H100/A30 only, **not the L4** |
+| **CCE xGPU** | hard VRAM limit (128 MiB steps) and compute limit (percent) per pod, up to 20 slices per card | `gpu_xgpu = true` |
+
+> **Not available on the L4 — therefore off in dev (`gpu_xgpu = false`).** Tested in dev (gpu-beta 2.15.6, HCE OS 2.0, driver 580): the device plugin reports `current gpu name is not supported, use legacy shared mode`, the node keeps `enableXGPU: false`, no `volcano.sh/gpu-*` resources appear and the slicing pods stay pending.
+
+**Where xGPU works:** CCE xGPU supports only **NVIDIA Tesla T4 and V100**. Matching flavors in eu-de (all GPU flavors with availability: [gpu-flavors.md](gpu-flavors.md)):
+
+| Flavor | GPU | vCPU / RAM | AZ (status at time of writing) |
+|---|---|---|---|
+| `pi2.2xlarge.4` | 1× T4 16 GB | 8 / 32 GB | eu-de-01, eu-de-03 |
+| `pi2.4xlarge.4`, `pi2.8xlarge.4` | 2× / 4× T4 16 GB | 16 / 64 GB, 32 / 128 GB | eu-de-01, eu-de-03 |
+| `p2s.2xlarge.8` (… `16xlarge`) | 1× (…8×) V100 PCIe 32 GB | 8 / 64 GB | eu-de-01 |
+| `p2v.2xlarge.8` (… `16xlarge`) | 1× (…8×) V100 SXM2 16 GB | 8 / 64 GB | eu-de-01, eu-de-03 |
+
+Not supported: L4 (`pi5e`), A40 (`g7`), A100 (`p3`), H100 (`p5e`, `p5s`). Availability changes; check with the ECS flavor API (`os_extra_specs`: `pci_passthrough:gpu_specs`, `cond:operation:az`).
+
+**Consequences of switching to T4/V100:**
+
+- **No CCE Turbo.** Turbo clusters (`container_network_type = "eni"`, as in dev/prod) only run the GPU families `g7`, `pi5e` and `p5e` (enforced by the `node_pools` validation; other network types also allow `pi2`, `p2s`, `p2v`). T4/V100 need a cluster with VPC network (`container_network_type = "vpc-router"` or `overlay_l2`). The network type cannot be changed later, so this means a **new cluster** (destroy and recreate the infra stack; pods no longer get VPC IPs from ENIs).
+- **Less VRAM:** a T4 has 16 GB — the playground models need ~20 GB together, so models are swapped more often and the slices must be smaller (e.g. playground 9 GiB, workers 1–2 GiB, total ≤ ~14.5 GiB; adjust the `gpu_slicing` validation limit). The V100 PCIe has 32 GB but is only available in eu-de-01.
+- **Older GPUs:** T4 (Turing) and V100 (Volta) are slower than the L4 and have no bf16 (the app falls back to fp16); SDXL-Turbo and the small models still work.
+- **Driver/CUDA:** check that the NVIDIA driver (`nvidia_driver_url`) supports the card and that the image's CUDA version (13.x) still supports it.
+
+CCE xGPU is part of the CCE AI Suite addon (`gpu-beta` ≥ 2.0.5, parameter `enable_xgpu`) and needs the **Volcano** scheduler addon (≥ 1.10.5, plugin `xgpu`). Pods set `schedulerName: volcano` and request
+
+```yaml
+resources:
+  limits:
+    volcano.sh/gpu-mem.128Mi: 16          # 2 GiB VRAM
+    volcano.sh/gpu-core.percentage: 10    # 10 % of the compute time
+```
+
+Inside the pod the driver reports only the slice (`nvidia-smi`, `torch.cuda.mem_get_info()`); allocations beyond it fail without affecting the other pods. All other pods keep using the default scheduler.
+
+**Enable** (both stacks, then Deploy with "Apply" and "Build Images"):
+
+```hcl
+# infra/envs/<environment>.tfvars
+gpu_xgpu = true   # enable_xgpu in the GPU addon + Volcano addon (volcano_version, default 1.22.5)
+
+# workloads/envs/<environment>.tfvars — optional, the default follows infra (output gpu_xgpu_enabled)
+gpu_slicing = {
+  playground = { mem_gib = 13, core_percent = 50 }
+  workers = [
+    { name = "small", mem_gib = 2, core_percent = 10 },
+    { name = "medium", mem_gib = 3, core_percent = 15 },
+    { name = "large", mem_gib = 4, core_percent = 25 },
+  ]
+}
+```
+
+With slicing, the playground runs in its own slice (the model manager keeps its VRAM budget inside `mem_gib` via `VRAM_LIMIT_GB`, so it unloads models earlier) and each worker is a small pod (`gpu-demo-slice-<name>`, same image, `MODE=slice-worker`, no models, no PVC, no ingress). The sum of all slices is validated against one L4 (≤ 22 GiB, ≤ 100 %). The **GPU Slicing** tab shows:
+
+- the VRAM and compute split of the card per pod;
+- per pod the slice as seen from inside (`mem_get_info`) and the last benchmark;
+- **Run on all slices:** every pod runs fp16 matmuls for ~6 s at the same time — with enforced compute limits the throughput follows `core_percent`;
+- **Isolation test** (workers only): allocates VRAM in 256 MiB steps until the driver refuses; it stops 1 GiB above the slice, so a missing limit is reported instead of starving the other pods.
+
+API: `GET /api/slicing`, `POST /api/slicing/bench`, `POST /api/slicing/oom/<worker>`.
+
+**Limits and checks after enabling:**
+
+- Verify: `kubectl describe node -l accelerator=nvidia | grep volcano.sh` shows allocatable `volcano.sh/gpu-mem.128Mi`; the node annotation `node-status.volcano.sh/nvidia` contains `"enableXGPU":true`.
+- xGPU support depends on GPU model (the L4 is not supported, see above), driver and OS (HCE OS 2.0 is supported; Ubuntu needs `enable_xgpu_support_ubuntu`). If the L4 or the driver is not supported, the slice resources never become allocatable and the pods stay pending — set `gpu_xgpu = false` again.
+- **Scale to zero:** whether the autoscaler creates a GPU node for pending pods with `volcano.sh/*` requests is not guaranteed. If pods stay pending with zero GPU nodes, set `min_count = 1` on the GPU pool (the node then runs permanently and costs money) or scale the node up once.
+- Without `enable_xgpu_burst` a slice cannot use idle compute of other slices, so a single benchmark also shows the cap.
+
 ## Troubleshooting
 
 ```bash
@@ -137,6 +216,7 @@ kubectl logs deploy/gpu-demo                                    # model download
 
 - **Pod pending, no scale-up:** GPU capacity in the AZ may be sold out → set `az = "eu-de-03"` on the GPU pool in `node_pools`.
 - **`nvidia.com/gpu` not allocatable:** the driver is still installing (~5 min after the node is ready).
+- **Slicing pods pending:** `kubectl get pods -l app=gpu-demo-slice`, `kubectl -n kube-system get pods | grep volcano`; see [GPU Slicing](#gpu-slicing).
 
 ## License
 

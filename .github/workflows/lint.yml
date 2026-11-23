@@ -47,6 +47,7 @@ jobs:
           helm lint workloads/charts/demo-app --set image=example,hostname=example.org,accessMode=api
           helm lint workloads/charts/demo-app --set image=example,hostname=example.org,accessMode=agent
           helm lint workloads/charts/gpu-demo --set image=example,hostname=example.org
+          helm lint workloads/charts/gpu-demo --set image=example,hostname=example.org,slicing.enabled=true
 
   scripts:
     name: Scripts and workflows

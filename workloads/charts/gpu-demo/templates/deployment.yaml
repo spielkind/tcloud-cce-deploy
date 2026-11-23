@@ -25,6 +25,9 @@ spec:
       {{- end }}
     spec:
       serviceAccountName: gpu-demo
+      {{- if .Values.slicing.enabled }}
+      schedulerName: volcano
+      {{- end }}
       imagePullSecrets:
         - name: default-secret
       nodeSelector:
@@ -54,6 +57,14 @@ spec:
               value: {{ .Values.preload | quote }}
             - name: IMAGE_SIZE
               value: {{ .Values.imageSize | quote }}
+            {{- if .Values.slicing.enabled }}
+            {{- include "gpu-demo.sliceEnv" (dict "name" "playground" "slice" .Values.slicing.playground) | nindent 12 }}
+            # The model manager keeps its VRAM budget inside the slice.
+            - name: VRAM_LIMIT_GB
+              value: {{ .Values.slicing.playground.memGib | quote }}
+            - name: SLICE_WORKERS
+              value: {{ include "gpu-demo.sliceWorkers" . | quote }}
+            {{- end }}
           ports:
             - containerPort: 8000
           securityContext:
@@ -62,7 +73,7 @@ spec:
             capabilities:
               drop: ["ALL"]
           resources:
-            {{- toYaml .Values.resources | nindent 12 }}
+            {{- include "gpu-demo.resources" (dict "resources" .Values.resources "slicing" .Values.slicing.enabled "slice" .Values.slicing.playground) | nindent 12 }}
           startupProbe:
             httpGet:
               path: /healthz

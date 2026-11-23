@@ -17,8 +17,11 @@ import sys
 import tempfile
 import threading
 import time
+import urllib.error
+import urllib.request
 import wave
 from collections import deque
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from typing import Literal
 
@@ -77,6 +80,27 @@ VRAM_ESTIMATES_GB = {
     "stt": _gb_env("STT_VRAM_GB", 2.0),
     "vision": _gb_env("VISION_VRAM_GB", 1.5),
 }
+
+# GPU slicing (CCE xGPU): MODE=slice-worker runs a model-free pod that only shows and exercises its slice.
+WORKER = os.environ.get("MODE", "playground") == "slice-worker"
+if WORKER:
+    PRELOAD = []
+SLICE_NAME = os.environ.get("SLICE_NAME", "")
+SLICE_MEM_GIB = _gb_env("SLICE_MEM_GIB", 0)
+SLICE_CORE_PERCENT = _gb_env("SLICE_CORE_PERCENT", 0)
+VRAM_LIMIT_GB = _gb_env("VRAM_LIMIT_GB", 0)  # model manager budget inside the slice (0 = whole GPU)
+CARD_MEM_GIB = _gb_env("CARD_MEM_GIB", 22)  # usable VRAM of one L4, used to draw the slicing bars
+
+
+def _slice_workers():
+    try:
+        items = json.loads(os.environ.get("SLICE_WORKERS", "[]") or "[]")
+    except ValueError:
+        return []
+    return [w for w in items if isinstance(w, dict) and w.get("name") and w.get("url")]
+
+
+SLICE_WORKERS = _slice_workers()
 
 gallery = deque(maxlen=GALLERY_SIZE)
 gpu_lock = threading.Lock()
@@ -152,6 +176,20 @@ def cuda_free() -> tuple[int, int] | None:
     return torch.cuda.mem_get_info()
 
 
+def budget_free() -> int | None:
+    """Free VRAM for the model manager; with VRAM_LIMIT_GB the budget stays inside the xGPU slice even if the
+    driver reports more."""
+    mem = cuda_free()
+    if mem is None:
+        return None
+    free = mem[0]
+    if VRAM_LIMIT_GB > 0:
+        import torch
+
+        free = min(free, int(VRAM_LIMIT_GB * 2**30) - torch.cuda.memory_reserved())
+    return max(0, free)
+
+
 def release_memory():
     gc.collect()
     if "torch" in sys.modules and cuda_ok():
@@ -218,6 +256,8 @@ class ModelManager:
         return slot
 
     def request_load(self, name: str) -> str:
+        if WORKER:
+            raise HTTPException(404, "Slice workers do not load models")
         slot = self.get(name)
         with self.lock:
             if slot.status in ("not_loaded", "error"):
@@ -258,14 +298,14 @@ class ModelManager:
     def _make_room(self, slot: Slot):
         need = slot.est_gb * 2**30
         while True:
-            mem = cuda_free()
-            if mem is None or mem[0] >= need:
+            free = budget_free()
+            if free is None or free >= need:
                 return
             with self.lock:
                 candidates = [s for s in self.slots.values()
                               if s is not slot and s.status == "ready" and s.in_use == 0]
                 if not candidates:
-                    slot.progress = f"only {mem[0] / 2**30:.1f} GB free, nothing to evict – loading anyway"
+                    slot.progress = f"only {free / 2**30:.1f} GB free, nothing to evict – loading anyway"
                     return
                 victim = min(candidates, key=lambda s: (s.keep, s.last_used or 0))
                 slot.progress = f"unloading '{victim.name}' to free VRAM"
@@ -725,6 +765,118 @@ def run_benchmark(n: int = 2048):
     return result
 
 
+# --------------------------------------------------------------------------------------------- GPU slicing
+_slice = {"last_bench": None, "last_oom": None}
+slice_lock = threading.Lock()  # one benchmark / OOM test per worker at a time
+SLICE_BENCH_SECONDS = 6.0
+STUB_L4_TFLOPS = 60.0
+
+
+def slice_self() -> dict:
+    info = {"name": SLICE_NAME or ("worker" if WORKER else "playground"), "role": "worker" if WORKER else "playground",
+            "pod": os.environ.get("HOSTNAME"), "node": os.environ.get("NODE_NAME"),
+            "mem_gib": SLICE_MEM_GIB or None, "core_percent": SLICE_CORE_PERCENT or None, "stub": STUB,
+            "version": VERSION, "busy": slice_lock.locked() if WORKER else gpu_job["name"],
+            "last_bench": _slice["last_bench"], "last_oom": _slice["last_oom"], "seen": None, "nvml": None}
+    if STUB:
+        total = SLICE_MEM_GIB or CARD_MEM_GIB
+        info["seen"] = {"device": "stub", "total_gb": total, "free_gb": round(total * 0.9, 2), "process_reserved_gb": 0}
+    elif cuda_ok():
+        import torch
+
+        free, total = torch.cuda.mem_get_info()  # under xGPU this reports the slice, not the whole card
+        info["seen"] = {"device": torch.cuda.get_device_name(0), "total_gb": round(total / 2**30, 2),
+                        "free_gb": round(free / 2**30, 2), "process_reserved_gb": round(torch.cuda.memory_reserved() / 2**30, 2)}
+    g = gpu_stats()["gpus"]
+    if g:
+        info["nvml"] = {k: g[0][k] for k in ("name", "util_pct", "vram_used_gb", "vram_total_gb")}
+    return info
+
+
+def slice_bench(seconds: float = SLICE_BENCH_SECONDS, n: int = 4096) -> dict:
+    """fp16 matmul throughput for a few seconds; with xGPU compute limits it follows core_percent."""
+    flop = 2 * n**3
+    if STUB:
+        time.sleep(1.0)
+        share = (SLICE_CORE_PERCENT or 100) / 100
+        tflops = STUB_L4_TFLOPS * share * random.uniform(0.92, 1.0)
+        result = {"tflops": round(tflops, 2), "reps": int(tflops * 1e12 * seconds / flop), "seconds": seconds}
+    else:
+        if not cuda_ok():
+            raise HTTPException(503, "No CUDA GPU visible in this pod")
+        import torch
+
+        x = torch.randn(n, n, device="cuda", dtype=torch.float16)
+        y = torch.randn(n, n, device="cuda", dtype=torch.float16)
+        for _ in range(3):
+            x @ y
+        torch.cuda.synchronize()
+        reps, start = 0, time.perf_counter()
+        while time.perf_counter() - start < seconds:
+            for _ in range(5):
+                x @ y
+            torch.cuda.synchronize()
+            reps += 5
+        elapsed = time.perf_counter() - start
+        del x, y
+        torch.cuda.empty_cache()
+        result = {"tflops": round(flop * reps / elapsed / 1e12, 2), "reps": reps, "seconds": round(elapsed, 2)}
+    result.update(n=n, dtype="fp16", at=time.time(), core_percent=SLICE_CORE_PERCENT or None)
+    _slice["last_bench"] = result
+    return result
+
+
+def slice_oom(step_mb: int = 256) -> dict:
+    """Allocate VRAM in steps until the driver refuses. Stops 1 GiB above the slice, so a missing limit cannot
+    starve the other pods for long."""
+    configured = SLICE_MEM_GIB or None
+    cap_gb = (configured or CARD_MEM_GIB) + 1
+    if STUB:
+        time.sleep(0.5)
+        allocated, hit, driver_error = (configured or CARD_MEM_GIB) - 0.5, True, "stub: CUDA out of memory"
+    else:
+        if not cuda_ok():
+            raise HTTPException(503, "No CUDA GPU visible in this pod")
+        import torch
+
+        blocks, hit, driver_error = [], False, None
+        try:
+            while len(blocks) * step_mb / 1024 < cap_gb:
+                blocks.append(torch.empty(step_mb * MB, dtype=torch.uint8, device="cuda"))
+        except (torch.OutOfMemoryError, RuntimeError) as e:  # xGPU may surface as a generic CUDA error
+            hit, driver_error = True, err_text(e, 240)
+        allocated = len(blocks) * step_mb / 1024
+        blocks.clear()
+        torch.cuda.empty_cache()
+    result = {"allocated_gb": round(allocated, 2), "configured_gb": configured, "limit_hit": hit, "cap_gb": cap_gb,
+              "driver_error": driver_error, "at": time.time(),
+              "isolated": bool(hit and configured and allocated <= configured + 0.25)}
+    _slice["last_oom"] = result
+    return result
+
+
+def _peer(method: str, url: str, timeout: float):
+    req = urllib.request.Request(url, method=method, data=b"" if method == "POST" else None)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:  # noqa: S310 - in-cluster service URLs from config
+            return json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        try:
+            detail = json.loads(e.read()).get("detail")
+        except ValueError:
+            detail = None
+        return {"error": detail or f"HTTP {e.code}"}
+    except Exception as e:  # noqa: BLE001 - unreachable / not ready yet
+        return {"error": err_text(e, 200)}
+
+
+def _worker(name: str) -> dict:
+    for w in SLICE_WORKERS:
+        if w["name"] == name:
+            return w
+    raise HTTPException(404, f"Unknown slice worker '{name}'")
+
+
 # --------------------------------------------------------------------------------------------- app
 class BodyLimit:
     """Reject oversized request bodies early (pure ASGI, so streaming responses are unaffected)."""
@@ -1088,6 +1240,89 @@ def benchmark():
         end_job(slot)
 
 
+@app.get("/api/slice")
+def slice_info():
+    return slice_self()
+
+
+@app.post("/api/slice/bench")
+def slice_bench_endpoint():
+    if WORKER:
+        if not slice_lock.acquire(blocking=False):
+            raise HTTPException(429, "Benchmark already running in this slice")
+        try:
+            return slice_bench()
+        finally:
+            slice_lock.release()
+    slot = begin_job(None, "slice benchmark")
+    try:
+        return slice_bench()
+    finally:
+        end_job(slot)
+
+
+@app.post("/api/slice/oom")
+def slice_oom_endpoint():
+    if not WORKER:
+        raise HTTPException(409, "The OOM test runs only in slice workers (the playground keeps its models)")
+    if not slice_lock.acquire(blocking=False):
+        raise HTTPException(429, "Another test is running in this slice")
+    try:
+        return slice_oom()
+    finally:
+        slice_lock.release()
+
+
+def _members() -> list[dict]:
+    me = slice_self()
+    with ThreadPoolExecutor(max_workers=max(1, len(SLICE_WORKERS))) as ex:
+        peers = list(ex.map(lambda w: _peer("GET", w["url"] + "/api/slice", 3), SLICE_WORKERS))
+    members = [me]
+    for w, p in zip(SLICE_WORKERS, peers):
+        p = dict(p)
+        p.setdefault("name", w["name"])
+        p.setdefault("role", "worker")
+        p["mem_gib"], p["core_percent"] = w.get("mem_gib"), w.get("core_percent")
+        members.append(p)
+    return members
+
+
+@app.get("/api/slicing")
+def slicing():
+    enabled = bool(SLICE_NAME) and not WORKER
+    return {"enabled": enabled, "card_gb": CARD_MEM_GIB, "members": _members() if enabled else [],
+            "stub": STUB, "version": VERSION}
+
+
+@app.post("/api/slicing/bench")
+def slicing_bench():
+    """Benchmark the playground slice and all workers at the same time."""
+    if not SLICE_NAME or WORKER:
+        raise HTTPException(409, "GPU slicing is not enabled")
+
+    def own():
+        try:
+            return slice_bench_endpoint()
+        except HTTPException as e:
+            return {"error": e.detail}
+
+    timeout = SLICE_BENCH_SECONDS + 60  # first call initialises CUDA in the worker
+    with ThreadPoolExecutor(max_workers=len(SLICE_WORKERS) + 1) as ex:
+        futures = [ex.submit(own)] + [ex.submit(_peer, "POST", w["url"] + "/api/slice/bench", timeout)
+                                      for w in SLICE_WORKERS]
+        results = [f.result() for f in futures]
+    names = [SLICE_NAME] + [w["name"] for w in SLICE_WORKERS]
+    cores = [SLICE_CORE_PERCENT or None] + [w.get("core_percent") for w in SLICE_WORKERS]
+    return {"results": [dict(r, name=n, core_percent=c) for n, c, r in zip(names, cores, results)]}
+
+
+@app.post("/api/slicing/oom/{name}")
+def slicing_oom(name: str):
+    if not SLICE_NAME or WORKER:
+        raise HTTPException(409, "GPU slicing is not enabled")
+    return dict(_peer("POST", _worker(name)["url"] + "/api/slice/oom", 180), name=name)
+
+
 @app.get("/", response_class=HTMLResponse)
 def index():
     return PAGE
@@ -1200,6 +1435,13 @@ PAGE = r"""<!DOCTYPE html>
   th, td { text-align:left; padding:8px 6px; border-bottom:1px solid var(--line); vertical-align:middle; }
   th { color:var(--muted); font-weight:600; font-size:12px; }
   td .dot { display:inline-block; margin-right:6px; }
+  .sbar { display:flex; height:26px; border-radius:8px; overflow:hidden; background:#1a2340; margin:6px 0 14px;
+          border:1px solid var(--line); }
+  .sbar span { display:block; height:100%; font-size:11px; font-weight:700; color:#0b1400; padding:0 6px; line-height:26px;
+               white-space:nowrap; overflow:hidden; text-overflow:ellipsis; border-right:2px solid #0b1020; }
+  .sbar span.free { background:transparent; color:var(--muted); font-weight:500; border-right:0; }
+  .swatch { display:inline-block; width:10px; height:10px; border-radius:3px; margin-right:6px; vertical-align:middle; }
+  .opts td:first-child { white-space:nowrap; font-weight:600; }
   footer { margin-top:28px; text-align:center; color:var(--muted); font-size:12px; }
 </style>
 </head>
@@ -1220,6 +1462,7 @@ PAGE = r"""<!DOCTYPE html>
     <button data-tab="stt">Speech → Text</button>
     <button data-tab="vision">Vision</button>
     <button data-tab="gpu">GPU</button>
+    <button data-tab="slicing">GPU Slicing</button>
   </nav>
 
   <!-- Text → Image -->
@@ -1420,6 +1663,54 @@ PAGE = r"""<!DOCTYPE html>
       <section class="card"><h2>Environment</h2><dl id="envInfo"><dt>…</dt><dd></dd></dl></section>
     </div>
   </section>
+
+  <!-- GPU slicing -->
+  <section class="panel" id="tab-slicing" hidden>
+    <section class="card" id="slOff" hidden>
+      <h2>GPU slicing is not enabled</h2>
+      <p class="explain">Right now the playground owns the whole GPU. With CCE xGPU one GPU is split into slices with a hard
+        VRAM and compute limit per pod, and several pods share the card. Enable it with <code>gpu_xgpu = true</code> in the infra
+        stack (GPU addon + Volcano scheduler); the workloads stack then deploys the playground in a slice plus a few slice workers.
+        See docs/gpu.md → GPU slicing.</p>
+    </section>
+    <div id="slOn" hidden>
+      <section class="card">
+        <h2>One GPU, several pods <span class="meta" id="slGpu"></span></h2>
+        <p class="explain">Volcano places every pod on the same GPU; CCE xGPU enforces each slice: a pod sees only its VRAM
+          and gets at most its share of the compute time. The playground models run in their own slice.</p>
+        <div class="k">VRAM (of ~<span id="slCard">22</span> GiB usable)</div><div class="sbar" id="slMemBar"></div>
+        <div class="k">Compute</div><div class="sbar" id="slCoreBar"></div>
+      </section>
+      <section class="card">
+        <h2>Pods</h2>
+        <table><thead><tr><th>Slice</th><th>Pod / node</th><th>VRAM slice</th><th>VRAM seen by the pod</th><th>Compute</th>
+          <th>Last benchmark</th><th>Isolation test</th></tr></thead><tbody id="slRows"></tbody></table>
+        <p class="explain" style="margin-top:12px">“VRAM seen by the pod” comes from <code>torch.cuda.mem_get_info()</code> inside
+          the pod – with xGPU it reports the slice, not the 24 GB card. The isolation test allocates memory until the driver
+          refuses (stops 1 GiB above the slice).</p>
+        <div class="msgbox" id="slMsg"></div>
+      </section>
+      <section class="card">
+        <h2>Benchmark all slices at once</h2>
+        <p class="explain">Every pod multiplies fp16 4096×4096 matrices for ~6 s at the same time. With hard compute limits the
+          measured throughput follows the configured share.</p>
+        <div class="row" style="margin-top:0"><button id="slBench">Run on all slices</button></div>
+        <div id="slBenchOut" style="margin-top:14px"></div>
+        <div class="msgbox" id="slBenchMsg"></div>
+      </section>
+    </div>
+    <section class="card">
+      <h2>Ways to share a GPU</h2>
+      <table class="opts"><tbody>
+        <tr><td>Whole GPU</td><td>One pod per card (<code>nvidia.com/gpu: 1</code>) – the default of this demo.</td></tr>
+        <tr><td>Time-slicing</td><td>NVIDIA device plugin hands the same card to several pods; no VRAM or fault isolation.
+          Not offered by the CCE addon.</td></tr>
+        <tr><td>MIG</td><td>Hardware partitions with own memory and SMs – only A100/H100/A30, not the L4.</td></tr>
+        <tr><td>CCE xGPU</td><td>Software slices with hard VRAM (128 MiB steps) and compute (percent) limits, up to 20 per card;
+          scheduled by Volcano (<code>volcano.sh/gpu-mem.128Mi</code>, <code>volcano.sh/gpu-core.percentage</code>).</td></tr>
+      </tbody></table>
+    </section>
+  </section>
   <footer id="foot"></footer>
 </div>
 <script>
@@ -1473,6 +1764,7 @@ function showTab(name) {
   document.querySelectorAll("#tabs button").forEach(b => b.classList.toggle("active", b.dataset.tab === name));
   if (location.hash !== "#" + name) history.replaceState(null, "", "#" + name);
   if (name === "gpu") refreshGpu();
+  if (name === "slicing") refreshSlicing();
 }
 document.querySelectorAll("#tabs button").forEach(b => b.onclick = () => showTab(b.dataset.tab));
 
@@ -1783,6 +2075,88 @@ $("benchGo").onclick = async () => {
   } catch (e) { say("benchMsg", e.message); }
   $("benchGo").disabled = false;
 };
+
+/* ---------- GPU slicing ---------- */
+const SL_COLORS = ["#76b900", "#38bdf8", "#fbbf24", "#f472b6", "#a78bfa", "#f87171", "#34d399", "#fb923c"];
+let slColor = {};
+function sbar(id, parts, total, unit) {
+  const used = parts.reduce((a, p) => a + (p.v || 0), 0);
+  const spans = parts.map(p => el("span", {style: `width:${100 * (p.v || 0) / total}%;background:${p.c}`,
+    title: `${p.name}: ${p.v} ${unit}`, text: `${p.name} ${p.v} ${unit}`}));
+  if (used < total) spans.push(el("span", {class: "free", style: `width:${100 * (total - used) / total}%`,
+    text: `free ${+(total - used).toFixed(2)} ${unit}`}));
+  $(id).replaceChildren(...spans);
+}
+function fmtBench(b) { return b ? `${b.tflops} TFLOPS (${ago(b.at)})` : "–"; }
+function fmtOom(o) {
+  if (!o) return "";
+  if (!o.limit_hit) return `⚠ not limited: ${o.allocated_gb} GiB allocated (cap ${o.cap_gb})`;
+  return (o.isolated ? "✔ limited at " : "⚠ stopped at ") + o.allocated_gb + " GiB";
+}
+async function refreshSlicing() {
+  let d; try { d = await api("api/slicing"); } catch (e) { say("slMsg", e.message); return; }
+  $("slOff").hidden = d.enabled; $("slOn").hidden = !d.enabled;
+  if (!d.enabled) return;
+  d.members.forEach((m, i) => slColor[m.name] = SL_COLORS[i % SL_COLORS.length]);
+  const card = Math.max(d.card_gb, d.members.reduce((a, m) => a + (m.mem_gib || 0), 0));
+  $("slCard").textContent = d.card_gb;
+  sbar("slMemBar", d.members.map(m => ({name: m.name, v: m.mem_gib, c: slColor[m.name]})), card, "GiB");
+  sbar("slCoreBar", d.members.map(m => ({name: m.name, v: m.core_percent, c: slColor[m.name]})), 100, "%");
+  const me = d.members[0];
+  $("slGpu").textContent = me.nvml ? "· " + me.nvml.name : (me.seen ? "· " + me.seen.device : "");
+  $("slRows").replaceChildren(...d.members.map(m => {
+    const seen = m.error ? el("span", {class: "meta", text: "unreachable: " + m.error})
+      : (m.seen ? `${m.seen.free_gb} free / ${m.seen.total_gb} GiB` : "CUDA not initialised");
+    let test = "";
+    if (m.role === "worker" && !m.error) {
+      const b = el("button", {class: "ghost", text: "Run", onclick: () => slOom(m.name, b)});
+      if (m.busy) b.disabled = true;
+      test = el("div", {}, b, el("div", {class: "meta", text: fmtOom(m.last_oom)}));
+    } else if (m.role === "playground") test = el("span", {class: "meta", text: "keeps its models"});
+    return el("tr", {},
+      el("td", {}, el("span", {class: "swatch", style: "background:" + slColor[m.name]}), el("b", {text: m.name}),
+        el("div", {class: "meta", text: m.role})),
+      el("td", {}, el("div", {text: m.pod || "–"}), el("div", {class: "meta", text: m.node || ""})),
+      el("td", {text: m.mem_gib != null ? m.mem_gib + " GiB" : "–"}), el("td", {}, seen),
+      el("td", {text: m.core_percent != null ? m.core_percent + " %" : "–"}), el("td", {text: fmtBench(m.last_bench)}),
+      el("td", {}, test));
+  }));
+  $("foot").textContent = "Build " + d.version + (d.stub ? " · STUB_MODELS=1 (simulated slices)" : "");
+}
+async function slOom(name, btn) {
+  btn.disabled = true; say("slMsg", `Isolation test in '${name}' running…`, "warn");
+  try {
+    const r = await api(`api/slicing/oom/${encodeURIComponent(name)}`, {method: "POST"});
+    if (r.limit_hit === undefined) say("slMsg", `${name}: ${r.error || "no result"}`);
+    else say("slMsg", r.isolated
+      ? `${name}: the driver refused more memory at ${r.allocated_gb} GiB (slice ${r.configured_gb} GiB) – other pods were not affected.`
+      : `${name}: allocated ${r.allocated_gb} GiB with a ${r.configured_gb} GiB slice – the VRAM limit is not enforced.`,
+      r.isolated ? "" : "warn");
+  } catch (e) { say("slMsg", e.message); }
+  btn.disabled = false; refreshSlicing();
+}
+$("slBench").onclick = async () => {
+  $("slBench").disabled = true; say("slBenchMsg", "Running on all slices (~6 s, first run initialises CUDA in the workers)…", "warn");
+  $("slBenchOut").replaceChildren();
+  try {
+    const r = await api("api/slicing/bench", {method: "POST"});
+    const ok = r.results.filter(x => x.tflops != null);
+    const sum = ok.reduce((a, x) => a + x.tflops, 0) || 1, max = Math.max(1, ...ok.map(x => x.tflops));
+    const cores = ok.reduce((a, x) => a + (x.core_percent || 0), 0) || 1;
+    $("slBenchOut").replaceChildren(el("table", {}, el("thead", {}, el("tr", {}, ...["Slice", "Compute share", "TFLOPS",
+      "Measured share", ""].map(t => el("th", {text: t})))), el("tbody", {}, ...r.results.map(x => el("tr", {},
+      el("td", {}, el("span", {class: "swatch", style: "background:" + (slColor[x.name] || "#888")}), x.name),
+      el("td", {text: x.core_percent != null ? `${x.core_percent} % (${Math.round(100 * x.core_percent / cores)} % of used)` : "–"}),
+      el("td", {text: x.tflops != null ? x.tflops : "error: " + x.error}),
+      el("td", {text: x.tflops != null ? Math.round(100 * x.tflops / sum) + " %" : "–"}),
+      el("td", {style: "width:30%"}, el("div", {class: "bar"}, el("i", {style: `width:${100 * (x.tflops || 0) / max}%;` +
+        `background:${slColor[x.name] || "#888"}`}))))))));
+    say("slBenchMsg", `Together ${sum.toFixed(1)} TFLOPS. With enforced compute limits the measured share follows the
+      configured share.`.replace(/\s+/g, " "), "");
+  } catch (e) { say("slBenchMsg", e.message); }
+  $("slBench").disabled = false; refreshSlicing();
+};
+setInterval(() => { if (!$("tab-slicing").hidden) refreshSlicing(); }, 3000);
 
 showTab(location.hash.slice(1)); refreshStatus(); gallery();
 </script>

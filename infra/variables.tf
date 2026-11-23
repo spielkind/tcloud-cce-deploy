@@ -407,6 +407,18 @@ variable "gpu_addon_version" {
   default     = "2.15.6"
 }
 
+variable "gpu_xgpu" {
+  description = "GPU slicing: enable CCE xGPU in the GPU addon and install the Volcano scheduler (pods share one GPU with hard VRAM/compute limits)"
+  type        = bool
+  default     = false
+}
+
+variable "volcano_version" {
+  description = "Volcano scheduler addon version or \"latest\" (installed only with gpu_xgpu = true)"
+  type        = string
+  default     = "1.22.5"
+}
+
 variable "nvidia_driver_url" {
   description = "NVIDIA Tesla driver .run URL installed on GPU nodes"
   type        = string
