@@ -9,6 +9,7 @@
 | [openbao-unseal.md](openbao-unseal.md) | Auto-unseal via native sidecar, KMS and workload identity | [openbao-unseal.svg](diagrams/openbao-unseal.svg) |
 | [openbao-vm.md](openbao-vm.md) | OpenBao on dedicated VMs (`openbao_mode = "vm"`) | [openbao-vm.svg](diagrams/openbao-vm.svg) |
 | [workload-identity.md](workload-identity.md) | OIDC workload identity for pods (no AK/SK) | [workload-identity.svg](diagrams/workload-identity.svg) |
+| [access-model.md](access-model.md) | Developer access concept: IAM groups, team namespaces, RBAC roles, network options (EIP, VPN, jump host) — not implemented | [access-model.svg](diagrams/access-model.svg), [access-network.svg](diagrams/access-network.svg) |
 | [demo-app.md](demo-app.md) | OpenBao demo app: sidecar vs. API access | [demo-app.svg](diagrams/demo-app.svg) |
 | [gpu-flavors.md](gpu-flavors.md) | GPU flavors in eu-de: availability, CPU, CCE Standard/Turbo and xGPU support | — |
 | [gpu.md](gpu.md) | GPU node pool, GPU AI playground (image, chat, speech, vision) and GPU slicing (xGPU) | [gpu.svg](diagrams/gpu.svg), [gpu-slicing.svg](diagrams/gpu-slicing.svg) |

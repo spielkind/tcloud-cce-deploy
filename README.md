@@ -39,6 +39,7 @@ Further documentation (index: [docs/README.md](docs/README.md), diagrams in [doc
 | OpenBao on dedicated VMs (`openbao_mode = "vm"`) | [docs/openbao-vm.md](docs/openbao-vm.md) |
 | Auto-unseal with a native sidecar + KMS (cce mode) | [docs/openbao-unseal.md](docs/openbao-unseal.md) |
 | Workload identity (OIDC, no AK/SK in pods) | [docs/workload-identity.md](docs/workload-identity.md) |
+| Developer access model: IAM + RBAC, team namespaces, network options (concept, not implemented) | [docs/access-model.md](docs/access-model.md) |
 | OpenBao demo app (both modes) | [docs/demo-app.md](docs/demo-app.md) |
 | GPU node pool + GPU AI playground (image, chat, speech, vision) + GPU slicing (xGPU) | [docs/gpu.md](docs/gpu.md) |
 
@@ -717,6 +718,7 @@ The new code uses different state keys (`<env>/infra/…`, `<env>/workloads/…`
 - Worker volumes optionally encrypted with a dedicated KMS key (yearly rotation) and master volumes optionally encrypted — enabled in dev and prod, see [optional hardening](#optional-hardening-volume-encryption)
 - Worker SSH closed by default; NodePorts limited to the VPC except where the ingress ELB needs them; node 80/443 opt-in
 - CCE API internal unless `bind_api_eip`; restrict it with `api_access_trustlist`
+- Only the admin certificate exists today (CI); per-developer, namespace-scoped access is described in [docs/access-model.md](docs/access-model.md)
 - OpenBao unseal keys stored only KMS-encrypted (cce: Secret, vm: OBS); root tokens revoked after initialization (both modes)
 - vm mode: API and bastion CIDRs must not be `/0`, TLS verified everywhere
 - Destroy requires typing `destroy`
