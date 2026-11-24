@@ -225,7 +225,7 @@
   <rect x="900" y="660" width="230" height="56" rx="8" fill="#1e2a4a" stroke="#3498db" stroke-width="1.5" filter="url(#shadow)"/>
   <text x="1015" y="682" text-anchor="middle" fill="#3498db" font-size="12" font-weight="700">OBS</text>
   <text x="1015" y="698" text-anchor="middle" fill="#889" font-size="8.5">state test-tfstate-&lt;hex&gt; (base project eu-de)</text>
-  <text x="1015" y="709" text-anchor="middle" fill="#666" font-size="8">test-openbao-unseal · keys.enc</text>
+  <text x="1015" y="709" text-anchor="middle" fill="#666" font-size="8">versioned · SSE-KMS · CTS audit (optional)</text>
 
   <!-- Cluster → services -->
   <line x1="820" y1="358" x2="897" y2="358" stroke="#e74c3c" stroke-width="1.2" stroke-dasharray="4 2" marker-end="url(#arrR)"/>
@@ -253,12 +253,12 @@
   <text x="46" y="765" fill="#888" font-size="8.5">disabled: no OpenBao (prod template)</text>
 
   <rect x="445" y="698" width="405" height="80" rx="8" fill="#221a36" stroke="#9b59b6" stroke-width="1.2"/>
-  <text x="461" y="718" fill="#c39bd3" font-size="11" font-weight="700">Auto-unseal · FunctionGraph test-openbao-unseal</text>
-  <text x="461" y="735" fill="#ccc" font-size="8.5">init container → OIDC → IAM token → async invoke</text>
-  <text x="461" y="750" fill="#ccc" font-size="8.5">function reads keys.enc (OBS) · decrypts (KMS) · PUT /v1/sys/unseal</text>
+  <text x="461" y="718" fill="#c39bd3" font-size="11" font-weight="700">Auto-unseal · native sidecar in each OpenBao pod</text>
+  <text x="461" y="735" fill="#ccc" font-size="8.5">SA token → IAM token (workload identity) → KMS decrypt</text>
+  <text x="461" y="750" fill="#ccc" font-size="8.5">ciphertext from Secret openbao-unseal-keys · unseal via 127.0.0.1</text>
   <text x="461" y="765" fill="#888" font-size="8.5">→ docs/openbao-unseal.md</text>
-  <line x1="850" y1="712" x2="897" y2="696" stroke="#9b59b6" stroke-width="1.2" stroke-dasharray="4 2" marker-end="url(#arrP)"/>
-  <text x="862" y="733" fill="#9b59b6" font-size="8" font-style="italic">unseal keys</text>
+  <line x1="850" y1="712" x2="897" y2="612" stroke="#9b59b6" stroke-width="1.2" stroke-dasharray="4 2" marker-end="url(#arrP)"/>
+  <text x="852" y="655" fill="#9b59b6" font-size="8" font-style="italic">decrypt</text>
 
   <!-- ═══════════════ GITHUB ACTIONS / OPENTOFU ═══════════════ -->
   <rect x="30" y="800" width="1100" height="52" rx="8" fill="#161b22" stroke="#30363d" stroke-width="1"/>

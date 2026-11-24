@@ -99,9 +99,22 @@ if [ "${DRY_RUN}" = "true" ]; then
   exit 0
 fi
 
-SEAL_STATUS=$(bao status -format=json 2>/dev/null || true)
-IS_INIT=$(jq -r '.initialized // false' <<< "${SEAL_STATUS}" 2>/dev/null || echo "false")
-IS_SEALED=$(jq -r '.sealed // true' <<< "${SEAL_STATUS}" 2>/dev/null || echo "true")
+read_status() {
+  local status flags rc=0
+  status=$(bao status -format=json) || rc=$?
+  # Exit 2 means sealed, not a transport error.
+  if [[ $rc != 0 && $rc != 2 ]]; then
+    echo "Cannot determine OpenBao status; refusing restore." >&2
+    return 1
+  fi
+  flags=$(jq -ers '
+    if length == 1 then .[0] else error("missing or ambiguous status") end |
+    if (.initialized | type) == "boolean" and (.sealed | type) == "boolean"
+    then [.initialized,.sealed] | @tsv else error("invalid seal status") end
+  ' <<< "$status") || return 1
+  IFS=$'\t' read -r IS_INIT IS_SEALED <<< "$flags"
+}
+read_status
 FORCE_RESTORE=false
 
 if [ "${IS_INIT}" = "false" ]; then
@@ -137,8 +150,7 @@ else
     if [ -x /usr/local/bin/bao-unseal.sh ]; then
       /usr/local/bin/bao-unseal.sh
       sleep 3
-      SEAL_STATUS=$(bao status -format=json 2>/dev/null || true)
-      IS_SEALED=$(jq -r '.sealed // true' <<< "${SEAL_STATUS}" 2>/dev/null || echo "true")
+      read_status
     fi
     if [ "${IS_SEALED}" = "true" ]; then
       echo "  ERROR: OpenBao is still sealed. Unseal manually before restoring." >&2

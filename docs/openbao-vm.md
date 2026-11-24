@@ -147,9 +147,10 @@ TLS is verified on every path: public Let's Encrypt chains via the system CA sto
 1. **Apply infra and workloads** (`create_openbao = true` in `workloads/envs/<env>.tfvars`): Deploy workflow or locally
 
    ```bash
-   tofu -chdir=infra init -reconfigure -backend-config=envs/dev.backend.tfvars
+   export TF_VAR_environment=dev
+   bash scripts/init-stack.sh infra
    tofu -chdir=infra apply -var-file=envs/dev.tfvars
-   tofu -chdir=workloads init -reconfigure -backend-config=envs/dev.backend.tfvars
+   bash scripts/init-stack.sh workloads
    tofu -chdir=workloads apply -var-file=envs/dev.tfvars
    ```
 
@@ -212,6 +213,8 @@ sudo BAO_TOKEN=... bao-approle.sh     # re-create the AppRole / new secret_id
 **Certificate refresh (Let's Encrypt):** the bastion renews daily (`certbot renew`, 03:17 + random delay) and uploads the certificate to OBS (`certs/<fqdn>/`); the nodes install it daily at 04:41 (`openbao-cert-refresh.sh`) and reload OpenBao (SIGHUP) when it changed. A rebuilt bastion restores the certbot state from OBS. BYO certificates are written at VM creation; change them via OpenTofu (VM replacement).
 
 **Restore** (bastion):
+
+Every backup explicitly renews its periodic token before reading the snapshot. If renewal fails (for example, the scheduler was down past the token period), use `bao-snapshot-setup.sh` with an authorized token to issue a replacement. Failed backups exit non-zero and are logged as `bao-snapshot` errors; monitor them and the last successful OBS upload. A change of the restore helper or `user_data` replaces the bastion on the next apply — check the plan and have a usable backup and recovery credentials first.
 
 ```bash
 sudo bao-restore.sh --dry-run               # list snapshots in OBS, change nothing

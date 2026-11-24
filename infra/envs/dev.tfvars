@@ -1,6 +1,6 @@
 # =============================================================================
 # dev — self-contained environment configuration
-#   tofu init  -backend-config=envs/dev.backend.tfvars
+#   export TF_VAR_environment=dev; bash ../scripts/init-stack.sh infra
 #   tofu apply -var-file=envs/dev.tfvars
 # Credentials and otc_project_name come from TF_VAR_* environment variables.
 # =============================================================================

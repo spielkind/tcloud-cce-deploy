@@ -40,9 +40,10 @@ Helm release, namespace and ServiceAccount are all named `openbao`.
 3. Run **Actions → Deploy** (Apply) or locally:
 
 ```bash
-tofu -chdir=infra init -reconfigure -backend-config=envs/dev.backend.tfvars
+export TF_VAR_environment=dev
+bash scripts/init-stack.sh infra
 tofu -chdir=infra apply -var-file=envs/dev.tfvars
-tofu -chdir=workloads init -reconfigure -backend-config=envs/dev.backend.tfvars
+bash scripts/init-stack.sh workloads
 tofu -chdir=workloads apply -var-file=envs/dev.tfvars
 ```
 
@@ -81,20 +82,21 @@ This outputs 5 unseal keys + 1 root token.
 
 #### Step 2: Unseal openbao-0
 
+Run three times and enter one share at the hidden prompt each time (shares as command arguments end up in shell history and Kubernetes audit logs):
+
 ```bash
-kubectl exec -n openbao openbao-0 -c openbao -- bao operator unseal <key-1>
-kubectl exec -n openbao openbao-0 -c openbao -- bao operator unseal <key-2>
-kubectl exec -n openbao openbao-0 -c openbao -- bao operator unseal <key-3>
+kubectl exec -it -n openbao openbao-0 -c openbao -- bao operator unseal
 ```
 
 ### Option C: Script (recommended)
 
 ```bash
+export TF_VAR_environment=dev   # infra/ initialized for this environment
 ./scripts/openbao-init.sh
 ```
 
-Does everything automatically: init → unseal → raft join → configure KV v2 + userpass + Kubernetes auth → create admin user → revoke root → optionally upload unseal keys to OBS (`scripts/upload-unseal-keys.py`). It only works in cce mode and exits if infra reports another `openbao_mode`.
-The script uses `KUBECONFIG` only if it points to a non-empty file with a current context; otherwise (unset, missing or stale file) it reads the kubeconfig from the infra state (`infra/` must be initialized locally). It checks API connectivity first and prints the cluster endpoint. The StatefulSet uses `OrderedReady`, so `openbao-1`/`openbao-2` only start once the previous pod is unsealed; the script waits for each peer (up to 10 minutes) before joining it. Keys are saved immediately after initialization to a new `openbao.keys.XXXXXX` file (gitignored), without overwriting existing files. Copy them to your password manager, then delete the file. The admin password is not saved to disk.
+Does everything automatically: init → unseal → raft join → configure KV v2 + userpass + Kubernetes auth → create admin user → revoke root → optionally store the unseal keys for auto-unseal (KMS ciphertext in the Secret `openbao-unseal-keys`, `scripts/upload-unseal-keys.py`). It only works in cce mode and exits if infra reports another `openbao_mode`.
+The script always targets the cluster from the infra state of `TF_VAR_environment` (`infra/` initialized for it); if `KUBECONFIG` is set, its API endpoint and CA must match that cluster, otherwise it refuses. It checks API connectivity first, prints the cluster endpoint, reads the replica count from the StatefulSet and passes the shares via stdin (never as `kubectl exec` arguments). The key file starts with `Environment:` and `CCE Cluster ID:`, which `upload-unseal-keys.py` checks. The StatefulSet uses `OrderedReady`, so `openbao-1`/`openbao-2` only start once the previous pod is unsealed; the script waits for each peer (up to 10 minutes) before joining it. Keys are saved immediately after initialization to a new `openbao.keys.XXXXXX` file (gitignored), without overwriting existing files. Copy them to your password manager, then delete the file. The admin password is not saved to disk.
 
 ### Step 3: Join + unseal Raft peers (Options A/B)
 
@@ -103,15 +105,9 @@ The script uses `KUBECONFIG` only if it points to a non-empty file with a curren
 kubectl exec -n openbao openbao-1 -c openbao -- bao operator raft join http://openbao-0.openbao-internal:8200
 kubectl exec -n openbao openbao-2 -c openbao -- bao operator raft join http://openbao-0.openbao-internal:8200
 
-# Unseal openbao-1
-kubectl exec -n openbao openbao-1 -c openbao -- bao operator unseal <key-1>
-kubectl exec -n openbao openbao-1 -c openbao -- bao operator unseal <key-2>
-kubectl exec -n openbao openbao-1 -c openbao -- bao operator unseal <key-3>
-
-# Unseal openbao-2
-kubectl exec -n openbao openbao-2 -c openbao -- bao operator unseal <key-1>
-kubectl exec -n openbao openbao-2 -c openbao -- bao operator unseal <key-2>
-kubectl exec -n openbao openbao-2 -c openbao -- bao operator unseal <key-3>
+# Unseal each peer: three times, one share per hidden prompt
+kubectl exec -it -n openbao openbao-1 -c openbao -- bao operator unseal
+kubectl exec -it -n openbao openbao-2 -c openbao -- bao operator unseal
 ```
 
 ### Step 4: Configure (Options A/B)
@@ -181,7 +177,7 @@ kubectl -n openbao exec openbao-0 -c openbao -- bao audit list   # needs a token
 ## After Pod Restarts
 
 OpenBao seals itself on restart. With [Auto-Unseal](openbao-unseal.md) enabled,
-this is handled automatically via FunctionGraph + KMS.
+this is handled automatically by the `auto-unseal` sidecar (KMS, [auto-unseal](openbao-unseal.md)).
 
 Without auto-unseal, unseal manually:
 
@@ -192,9 +188,7 @@ kubectl exec -n openbao openbao-1 -c openbao -- bao status
 kubectl exec -n openbao openbao-2 -c openbao -- bao status
 
 # Unseal each sealed pod (3 keys per pod)
-kubectl exec -n openbao openbao-<N> -c openbao -- bao operator unseal <key-1>
-kubectl exec -n openbao openbao-<N> -c openbao -- bao operator unseal <key-2>
-kubectl exec -n openbao openbao-<N> -c openbao -- bao operator unseal <key-3>
+kubectl exec -it -n openbao openbao-<N> -c openbao -- bao operator unseal   # 3x, one share per hidden prompt
 ```
 
 ---
@@ -280,8 +274,8 @@ Infra (`infra/envs/<env>.tfvars`):
 | Variable | Default | Description |
 |---|---|---|
 | `openbao_mode` | `cce` | Must be `cce` for this page |
-| `create_openbao_unseal` | `false` | KMS + OBS + FunctionGraph auto-unseal |
-| `create_workload_identity` | `false` | OIDC identity provider for the unseal init container (needs `bind_api_eip`) |
+| `create_openbao_unseal` | `false` | KMS key + decrypt role for the auto-unseal sidecar |
+| `create_workload_identity` | `false` | OIDC identity provider for the auto-unseal sidecar (needs `bind_api_eip`) |
 
 Workloads (`workloads/envs/<env>.tfvars`):
 

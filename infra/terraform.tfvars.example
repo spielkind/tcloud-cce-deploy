@@ -127,6 +127,6 @@ create_lts = false
 
 # --- OpenBao / workload identity ---
 openbao_mode = "disabled" # disabled | cce | vm
-# create_openbao_unseal    = false # cce mode: KMS + OBS + FunctionGraph auto-unseal
+# create_openbao_unseal    = false # cce mode: KMS-based auto-unseal sidecar (needs create_workload_identity)
 # create_workload_identity = false # requires bind_api_eip = true
 # openbao_vm = { ... }             # vm mode, see variables.tf for the full object

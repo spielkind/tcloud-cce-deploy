@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Initializes the in-cluster OpenBao (openbao_mode = "cce" only): init, unseal,
 # Raft join, KV v2 + userpass + Kubernetes auth, root token revocation and the
-# optional KMS-encrypted upload of the unseal keys for FunctionGraph auto-unseal.
+# optional KMS-encrypted upload of the unseal keys for the auto-unseal sidecar.
 #
 # VM mode (openbao_mode = "vm") is NOT handled here: SSH to the bastion and run
 # `sudo bao-init.sh` (KMS auto-unseal, AppRole, snapshots), then
@@ -10,11 +10,10 @@ set -euo pipefail
 umask 077
 
 NAMESPACE="openbao"
-REPLICAS=3
 THRESHOLD=3
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-TEMP_KUBECONFIG=""
-trap 'if [[ -n "$TEMP_KUBECONFIG" ]]; then rm -f -- "$TEMP_KUBECONFIG"; fi' EXIT
+# shellcheck source=scripts/lib-openbao-target.sh
+source "$SCRIPT_DIR/lib-openbao-target.sh"
 
 # Colors
 G='\033[0;32m' Y='\033[1;33m' R='\033[0;31m' N='\033[0m'
@@ -22,39 +21,8 @@ G='\033[0;32m' Y='\033[1;33m' R='\033[0;31m' N='\033[0m'
 echo -e "${Y}OpenBao Initial Setup (cce mode)${N}"
 echo ""
 
-if command -v tofu >/dev/null; then
-  MODE=$(tofu -chdir="$SCRIPT_DIR/../infra" output -raw openbao_mode 2>/dev/null || true)
-  if [[ -n "$MODE" && "$MODE" != "cce" ]]; then
-    echo -e "${R}infra openbao_mode is '$MODE'; this script only initializes the in-cluster (cce) OpenBao.${N}" >&2
-    if [[ "$MODE" == "vm" ]]; then
-      echo "VM mode: ssh to the bastion and run 'sudo bao-init.sh'." >&2
-    fi
-    exit 1
-  fi
-fi
-
-kubeconfig_usable() {
-  [[ -s "$1" ]] && KUBECONFIG="$1" kubectl config current-context >/dev/null 2>&1
-}
-
-# Use the deployed cluster by default, not a possibly stale kubectl context.
-for cmd in kubectl jq; do
-  command -v "$cmd" >/dev/null || { echo "$cmd not found" >&2; exit 1; }
-done
-if [[ -n "${KUBECONFIG:-}" ]] && ! kubeconfig_usable "$KUBECONFIG"; then
-  echo -e "${Y}KUBECONFIG=$KUBECONFIG is missing, empty or has no context; using the infra state instead.${N}" >&2
-  unset KUBECONFIG
-fi
-if [[ -z "${KUBECONFIG:-}" ]]; then
-  command -v tofu >/dev/null || { echo "tofu not found; set KUBECONFIG explicitly" >&2; exit 1; }
-  TEMP_KUBECONFIG=$(mktemp "${TMPDIR:-/tmp}/openbao-kubeconfig.XXXXXX")
-  if ! tofu -chdir="$SCRIPT_DIR/../infra" output -raw kubeconfig > "$TEMP_KUBECONFIG" 2>/dev/null ||
-     ! kubeconfig_usable "$TEMP_KUBECONFIG"; then
-    echo "Could not read kubeconfig from the infra state. Run: tofu -chdir=infra init (with TF_VAR_* set)" >&2
-    exit 1
-  fi
-  export KUBECONFIG="$TEMP_KUBECONFIG"
-fi
+# Cluster from the infra state of TF_VAR_environment; a KUBECONFIG for another cluster is refused.
+openbao_select_target "$SCRIPT_DIR"
 
 SERVER=$(kubectl config view --minify -o jsonpath='{.clusters[0].cluster.server}' 2>/dev/null || true)
 if ! kubectl --request-timeout=15s get --raw /readyz > /dev/null 2>&1; then
@@ -67,6 +35,8 @@ kube() {
   kubectl -n "$NAMESPACE" "$@"
 }
 
+REPLICAS=$(kube --request-timeout=15s get statefulset openbao -o json |
+  jq -er '.spec.replicas | select(type == "number" and . >= 1 and floor == .)')
 kube --request-timeout=15s get --raw "/api/v1/namespaces/$NAMESPACE/pods/openbao-0" > /dev/null
 # Normalize OpenBao's expected sealed exit code inside the pod so kubectl stays quiet.
 if ! STATUS=$(kube --request-timeout=15s exec openbao-0 -c openbao -- \
@@ -93,10 +63,12 @@ if ! (set -o noclobber; kube exec openbao-0 -c openbao -- bao operator init \
   exit 1
 fi
 
-jq -er '
+# Environment + cluster ID bind the key file to this cluster (checked by upload-unseal-keys.py).
+jq -er --arg env "$TF_VAR_environment" --arg cluster "$CLUSTER_ID" '
   select((.root_token | type == "string" and length > 0) and
     (.unseal_keys_b64 | type == "array" and length == 5 and all(.[]; type == "string" and length > 0)))
-  | (.unseal_keys_b64 | to_entries[] | "Unseal Key \(.key + 1): \(.value)"), "Root Token: \(.root_token)"
+  | "Environment: \($env)", "CCE Cluster ID: \($cluster)",
+    (.unseal_keys_b64 | to_entries[] | "Unseal Key \(.key + 1): \(.value)"), "Root Token: \(.root_token)"
 ' "$INIT_FILE" > "$KEY_FILE" || {
   echo "Could not parse init response; preserve $INIT_FILE." >&2
   exit 1
@@ -119,9 +91,14 @@ echo -e "${G}Initialized${N}"
 # Step 2: Unseal openbao-0
 # ============================================================
 echo -e "${Y}Step 2/6: Unsealing openbao-0...${N}"
-for ((i = 0; i < THRESHOLD; i++)); do
-  kube exec openbao-0 -c openbao -- bao operator unseal "${KEYS[$i]}" > /dev/null
-done
+# Shares go via stdin, never as exec arguments (those can end up in Kubernetes audit logs).
+unseal_pod() {
+  local i
+  for ((i = 0; i < THRESHOLD; i++)); do
+    printf '%s' "${KEYS[$i]}" | kube exec -i "$1" -c openbao -- bao write sys/unseal key=- > /dev/null
+  done
+}
+unseal_pod openbao-0
 echo -e "${G}openbao-0 unsealed${N}"
 
 # ============================================================
@@ -145,9 +122,7 @@ for ((r = 1; r < REPLICAS; r++)); do
   wait_for_pod "openbao-$r"
   kube exec "openbao-$r" -c openbao -- bao operator raft join \
     http://openbao-0.openbao-internal:8200 > /dev/null
-  for ((i = 0; i < THRESHOLD; i++)); do
-    kube exec "openbao-$r" -c openbao -- bao operator unseal "${KEYS[$i]}" > /dev/null
-  done
+  unseal_pod "openbao-$r"
   echo -e "${G}openbao-${r} joined and unsealed${N}"
 done
 
@@ -198,17 +173,17 @@ echo -e "${G}Root token revoked${N}"
 echo -e "${Y}Step 5/6: Keys are saved to $KEY_FILE.${N}"
 
 # ============================================================
-# Step 6: Upload unseal keys (KMS encrypt + OBS)
+# Step 6: Store unseal keys for the auto-unseal sidecar (KMS ciphertext → Secret)
 # ============================================================
 UPLOAD_SCRIPT="$SCRIPT_DIR/upload-unseal-keys.py"
 if [ -f "$UPLOAD_SCRIPT" ]; then
   echo ""
-  read -rp "Upload unseal keys to OBS (KMS encrypted)? [Y/n]: " UPLOAD_CONFIRM
+  read -rp "Store unseal keys for auto-unseal (KMS encrypted, Secret openbao-unseal-keys)? [Y/n]: " UPLOAD_CONFIRM
   UPLOAD_CONFIRM=${UPLOAD_CONFIRM:-Y}
   if [[ "$UPLOAD_CONFIRM" =~ ^[Yy] ]]; then
     echo -e "${Y}Step 6/6: Uploading unseal keys...${N}"
     if python3 "$UPLOAD_SCRIPT" "$KEY_FILE"; then
-      echo -e "${G}Unseal keys encrypted and uploaded to OBS${N}"
+      echo -e "${G}Unseal keys encrypted and stored for auto-unseal${N}"
     else
       echo -e "${R}Upload failed — you can retry manually:${N}"
       echo "  python3 $UPLOAD_SCRIPT $KEY_FILE"
@@ -218,7 +193,7 @@ if [ -f "$UPLOAD_SCRIPT" ]; then
     echo "  python3 $UPLOAD_SCRIPT $KEY_FILE"
   fi
 else
-  echo -e "${Y}upload-unseal-keys.py not found, skipping OBS upload${N}"
+  echo -e "${Y}upload-unseal-keys.py not found, skipping auto-unseal setup${N}"
 fi
 
 echo ""

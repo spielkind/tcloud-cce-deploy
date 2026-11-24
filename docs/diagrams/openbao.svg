@@ -46,19 +46,19 @@
   <text x="170" y="222" text-anchor="middle" fill="#f39c12" font-size="12" font-weight="700">openbao-0</text>
   <text x="170" y="237" text-anchor="middle" fill="#e0e0e0" font-size="9">leader (active)</text>
   <text x="170" y="252" text-anchor="middle" fill="#889" font-size="8">Raft · EVS PVC (csi-disk) · /openbao/data</text>
-  <text x="170" y="266" text-anchor="middle" fill="#c39bd3" font-size="8">init container: unseal-trigger</text>
+  <text x="170" y="266" text-anchor="middle" fill="#c39bd3" font-size="8">sidecar: auto-unseal</text>
 
   <rect x="350" y="204" width="200" height="70" rx="6" fill="url(#card)" stroke="#f39c12" stroke-width="1"/>
   <text x="450" y="222" text-anchor="middle" fill="#f39c12" font-size="12" font-weight="700">openbao-1</text>
   <text x="450" y="237" text-anchor="middle" fill="#e0e0e0" font-size="9">follower (standby)</text>
   <text x="450" y="252" text-anchor="middle" fill="#889" font-size="8">Raft · EVS PVC (csi-disk) · /openbao/data</text>
-  <text x="450" y="266" text-anchor="middle" fill="#c39bd3" font-size="8">init container: unseal-trigger</text>
+  <text x="450" y="266" text-anchor="middle" fill="#c39bd3" font-size="8">sidecar: auto-unseal</text>
 
   <rect x="630" y="204" width="200" height="70" rx="6" fill="url(#card)" stroke="#f39c12" stroke-width="1"/>
   <text x="730" y="222" text-anchor="middle" fill="#f39c12" font-size="12" font-weight="700">openbao-2</text>
   <text x="730" y="237" text-anchor="middle" fill="#e0e0e0" font-size="9">follower (standby)</text>
   <text x="730" y="252" text-anchor="middle" fill="#889" font-size="8">Raft · EVS PVC (csi-disk) · /openbao/data</text>
-  <text x="730" y="266" text-anchor="middle" fill="#c39bd3" font-size="8">init container: unseal-trigger</text>
+  <text x="730" y="266" text-anchor="middle" fill="#c39bd3" font-size="8">sidecar: auto-unseal</text>
 
   <line x1="270" y1="239" x2="350" y2="239" stroke="#f39c12" stroke-width="1" stroke-dasharray="3,2"/>
   <line x1="550" y1="239" x2="630" y2="239" stroke="#f39c12" stroke-width="1" stroke-dasharray="3,2"/>
@@ -121,9 +121,9 @@
   <!-- Setup flow -->
   <rect x="30" y="544" width="840" height="46" rx="6" fill="#141c30"/>
   <text x="50" y="562" fill="#aaa" font-size="9" font-weight="600">Setup (one-time):</text>
-  <text x="50" y="580" fill="#889" font-size="9">tofu apply → openbao-init.sh → upload unseal keys to OBS (KMS-encrypted) → auto-unseal via Init Container + FunctionGraph</text>
+  <text x="50" y="580" fill="#889" font-size="9">tofu apply → openbao-init.sh → store unseal keys (KMS ciphertext, Secret) → auto-unseal via native sidecar</text>
 
   <!-- Footer -->
-  <text x="450" y="610" text-anchor="middle" fill="#556" font-size="9">Unseal keys KMS-encrypted in OBS · Root token revoked after setup · Auto-unseal via FunctionGraph on pod restart</text>
+  <text x="450" y="610" text-anchor="middle" fill="#556" font-size="9">Unseal keys only as KMS ciphertext · Root token revoked after setup · Sidecar unseals via 127.0.0.1 on every restart</text>
   <text x="450" y="626" text-anchor="middle" fill="#445" font-size="8">See docs/openbao-unseal.md for auto-unseal architecture</text>
 </svg>

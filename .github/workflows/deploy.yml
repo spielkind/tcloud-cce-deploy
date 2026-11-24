@@ -73,7 +73,7 @@ jobs:
 
       - name: OpenTofu Init
         working-directory: infra
-        run: tofu init -input=false -backend-config="envs/${DEPLOY_ENV}.backend.tfvars"
+        run: bash ../scripts/init-stack.sh infra
 
       - name: OpenTofu Format Check
         working-directory: infra
@@ -238,7 +238,7 @@ jobs:
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.OTC_ACCESS_KEY }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.OTC_SECRET_KEY }}
-        run: tofu init -input=false -backend-config="envs/${DEPLOY_ENV}.backend.tfvars"
+        run: bash ../scripts/init-stack.sh workloads
 
       - name: Select image tags
         working-directory: workloads
@@ -251,12 +251,22 @@ jobs:
           GPU_BUILT: ${{ needs.build-images.result == 'success' && needs.infra.outputs.gpu_enabled == 'true' }}
         run: |
           # New build → its commit SHA; otherwise keep the currently deployed tag.
-          tag() { if [ "$1" = "true" ]; then echo "$GITHUB_SHA"; else tofu output -raw "$2" 2>/dev/null || true; fi; }
+          set -euo pipefail
+          # Filter immediately; other state outputs can contain credentials.
+          TAGS=$(tofu output -json | jq -ce 'with_entries(select(.key == "demo_app_image_tag" or .key == "gpu_demo_image_tag"))')
+          tag() {
+            if [ "$1" = true ]; then printf '%s\n' "$GITHUB_SHA"; else
+              jq -er --arg key "$2" '
+                (if has($key) then .[$key].value else "latest" end) |
+                select(type == "string" and test("\\A[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}\\z"))
+              ' <<< "$TAGS"
+            fi
+          }
           DEMO=$(tag "$BUILT" demo_app_image_tag)
           GPU=$(tag "$GPU_BUILT" gpu_demo_image_tag)
           {
-            echo "TF_VAR_demo_app_image_tag=${DEMO:-latest}"
-            echo "TF_VAR_gpu_demo_image_tag=${GPU:-latest}"
+            echo "TF_VAR_demo_app_image_tag=$DEMO"
+            echo "TF_VAR_gpu_demo_image_tag=$GPU"
           } >> "$GITHUB_ENV"
 
       - name: OpenTofu Plan

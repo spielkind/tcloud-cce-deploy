@@ -59,7 +59,7 @@ jobs:
         run: shellcheck scripts/*.sh infra/modules/openbao/files/*.sh
 
       - name: Ruff
-        run: pipx run ruff==0.17.6 check --isolated --select E,F,W --line-length 140 scripts workloads/demo-app workloads/gpu-demo infra/modules/openbao-unseal/function infra/modules/openbao/files
+        run: pipx run ruff==0.17.6 check --isolated --select E,F,W --line-length 140 scripts workloads/demo-app workloads/gpu-demo workloads/files infra/modules/openbao/files
 
       - name: actionlint
         run: |

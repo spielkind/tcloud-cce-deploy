@@ -133,17 +133,13 @@ module "swr" {
 }
 
 # =============================================================================
-# OpenBao Auto-Unseal (KMS + OBS + FunctionGraph)
+# OpenBao Auto-Unseal (KMS key + decrypt role for the in-pod sidecar)
 # =============================================================================
 module "openbao_unseal" {
   source = "./modules/openbao-unseal"
 
   name_prefix           = var.name_prefix
   create_openbao_unseal = var.create_openbao_unseal && var.openbao_mode == "cce"
-  project_name          = var.otc_project_name
-  vpc_id                = module.vpc.vpc_id
-  subnet_id             = module.vpc.subnet_network_id
-  enable_vpc_access     = true
   tags                  = local.tags
 }
 

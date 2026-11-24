@@ -24,7 +24,7 @@ OTC equivalent of AWS IRSA (IAM Roles for Service Accounts).
 1. **Pod** mounts a projected ServiceAccount token with a custom audience
 2. **kubelet** auto-generates and rotates a signed JWT (OIDC token)
 3. Pod exchanges the OIDC token for an **IAM token** via the IAM federation API
-4. Pod uses the IAM token to call **OTC APIs** (FunctionGraph, OBS, KMS, etc.)
+4. Pod uses the IAM token to call **OTC APIs** (KMS, OBS, …)
 
 No AK/SK. No secrets. No node agency. Token auto-rotates every 24h.
 
@@ -60,7 +60,8 @@ The JWKS is fetched automatically via `data.external` when `create_workload_iden
 ### 3. Apply
 
 ```bash
-tofu -chdir=infra init -reconfigure -backend-config=envs/dev.backend.tfvars
+export TF_VAR_environment=dev
+bash scripts/init-stack.sh infra
 tofu -chdir=infra apply -var-file=envs/dev.tfvars
 ```
 
@@ -140,7 +141,7 @@ Current workloads:
 
 | Module | ServiceAccount | Permissions |
 |---|---|---|
-| `openbao_unseal` | `system:serviceaccount:openbao:openbao` | FunctionGraph invoke (auto-unseal, see [OpenBao Auto-Unseal](openbao-unseal.md)) |
+| `openbao_unseal` | `system:serviceaccount:openbao:openbao` | KMS decrypt (auto-unseal sidecar, see [OpenBao Auto-Unseal](openbao-unseal.md)) |
 
 ## Token Details
 

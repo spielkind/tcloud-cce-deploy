@@ -393,7 +393,7 @@ variable "ssh_public_key" {
 }
 
 variable "environment" {
-  description = "Deployment environment name (no default: always pass -var-file=envs/<env>.tfvars matching the backend file)"
+  description = "Deployment environment and state key; must match the environment used at init."
   type        = string
   validation {
     condition     = contains(["dev", "prod"], var.environment)
@@ -565,7 +565,7 @@ variable "nginx_ingress_controller_tag" {
 
 # --- OpenBao Auto-Unseal ---
 variable "create_openbao_unseal" {
-  description = "Create KMS key, OBS bucket and FunctionGraph function for OpenBao auto-unseal"
+  description = "Create the KMS key and decrypt role for the OpenBao auto-unseal sidecar (cce mode, needs create_workload_identity)"
   type        = bool
   default     = false
 }

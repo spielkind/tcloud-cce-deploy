@@ -107,7 +107,6 @@ output "ingress_elb_public_ip" {
   value       = module.cce.ingress_elb_public_ip
 }
 
-
 output "cluster_ca_cert" {
   value     = module.cce.cluster_ca_cert
   sensitive = true
@@ -147,14 +146,6 @@ output "otc_project_name" {
 
 output "openbao_unseal_kms_key_id" {
   value = module.openbao_unseal.kms_key_id
-}
-
-output "openbao_unseal_obs_bucket" {
-  value = module.openbao_unseal.obs_bucket
-}
-
-output "openbao_unseal_function_urn" {
-  value = module.openbao_unseal.function_urn
 }
 
 output "workload_identity_provider_id" {

@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 420" font-family="Inter, -apple-system, sans-serif">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 440" font-family="Inter, -apple-system, sans-serif">
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0%" stop-color="#1a1a2e"/>
@@ -7,116 +7,82 @@
     <marker id="ar-orange" viewBox="0 0 10 6" refX="9" refY="3" markerWidth="8" markerHeight="5" orient="auto"><path d="M0,0 L10,3 L0,6" fill="#ff922b"/></marker>
     <marker id="ar-purple" viewBox="0 0 10 6" refX="9" refY="3" markerWidth="8" markerHeight="5" orient="auto"><path d="M0,0 L10,3 L0,6" fill="#845ef7"/></marker>
     <marker id="ar-blue" viewBox="0 0 10 6" refX="9" refY="3" markerWidth="8" markerHeight="5" orient="auto"><path d="M0,0 L10,3 L0,6" fill="#4dabf7"/></marker>
-    <marker id="ar-teal" viewBox="0 0 10 6" refX="9" refY="3" markerWidth="8" markerHeight="5" orient="auto"><path d="M0,0 L10,3 L0,6" fill="#20c997"/></marker>
     <marker id="ar-green" viewBox="0 0 10 6" refX="9" refY="3" markerWidth="8" markerHeight="5" orient="auto"><path d="M0,0 L10,3 L0,6" fill="#51cf66"/></marker>
     <marker id="ar-grey" viewBox="0 0 10 6" refX="9" refY="3" markerWidth="8" markerHeight="5" orient="auto"><path d="M0,0 L10,3 L0,6" fill="#adb5bd"/></marker>
   </defs>
 
-  <rect width="960" height="420" fill="url(#bg)" rx="12"/>
-  <text x="480" y="28" fill="#e9ecef" font-size="16" font-weight="700" text-anchor="middle">OpenBao Auto-Unseal — Init Container Flow</text>
+  <rect width="960" height="440" fill="url(#bg)" rx="12"/>
+  <text x="480" y="28" fill="#e9ecef" font-size="16" font-weight="700" text-anchor="middle">OpenBao Auto-Unseal — Native Sidecar</text>
+  <text x="480" y="46" fill="#868e96" font-size="10" text-anchor="middle">keys stay inside the pod · KMS via workload identity · no extra listener, no network path for plaintext</text>
 
-  <!-- ==================== CCE Cluster: OpenBao pod ==================== -->
-  <rect x="20" y="45" width="290" height="125" rx="8" fill="none" stroke="#2a4a6b" stroke-width="1.5" stroke-dasharray="6,4"/>
-  <text x="165" y="61" fill="#868e96" font-size="9" text-anchor="middle">CCE Cluster — OpenBao pod (ns openbao) · ×3</text>
+  <!-- Pod frame -->
+  <rect x="20" y="62" width="520" height="250" rx="8" fill="none" stroke="#2a4a6b" stroke-width="1.5" stroke-dasharray="6,4"/>
+  <text x="280" y="80" fill="#868e96" font-size="10" text-anchor="middle">CCE cluster · OpenBao pod (StatefulSet openbao-N, ns openbao, SA openbao)</text>
 
-  <rect x="35" y="72" width="115" height="50" rx="6" fill="#ff922b" opacity="0.9"/>
-  <text x="92" y="94" fill="#fff" font-size="11" font-weight="700" text-anchor="middle">Init Container</text>
-  <text x="92" y="109" fill="#fff" font-size="8" text-anchor="middle" opacity="0.85">unseal-trigger (curl)</text>
+  <!-- OpenBao server -->
+  <rect x="40" y="95" width="220" height="120" rx="8" fill="#1f2a44" stroke="#51cf66" stroke-width="1.5"/>
+  <text x="150" y="116" fill="#8ce99a" font-size="12" font-weight="700" text-anchor="middle">openbao (server)</text>
+  <text x="150" y="133" fill="#adb5bd" font-size="9" text-anchor="middle">127.0.0.1:8200 · Raft</text>
+  <text x="150" y="160" fill="#ced4da" font-size="9" text-anchor="middle">sealed after every start</text>
+  <text x="150" y="175" fill="#ced4da" font-size="9" text-anchor="middle">unchanged: ingress :443, Raft :8201</text>
 
-  <rect x="175" y="72" width="120" height="50" rx="6" fill="#ffd43b" opacity="0.9"/>
-  <text x="235" y="94" fill="#1a1a2e" font-size="11" font-weight="700" text-anchor="middle">OpenBao</text>
-  <text x="235" y="109" fill="#1a1a2e" font-size="8" text-anchor="middle" opacity="0.75">starts sealed</text>
+  <!-- Sidecar -->
+  <rect x="300" y="95" width="220" height="120" rx="8" fill="#1f2a44" stroke="#845ef7" stroke-width="1.5"/>
+  <text x="410" y="116" fill="#b197fc" font-size="12" font-weight="700" text-anchor="middle">auto-unseal (native sidecar)</text>
+  <text x="410" y="133" fill="#adb5bd" font-size="9" text-anchor="middle">init container · restartPolicy: Always</text>
+  <text x="315" y="153" fill="#ced4da" font-size="9">every 30 s: seal-status</text>
+  <text x="315" y="168" fill="#ced4da" font-size="9">initialized + sealed →</text>
+  <text x="325" y="183" fill="#ced4da" font-size="9">① IAM token ② KMS decrypt</text>
+  <text x="325" y="198" fill="#ced4da" font-size="9">③ PUT /v1/sys/unseal</text>
 
-  <!-- init exits → OpenBao starts -->
-  <line x1="150" y1="97" x2="172" y2="97" stroke="#adb5bd" stroke-width="1.5" marker-end="url(#ar-grey)"/>
-  <text x="145" y="136" fill="#adb5bd" font-size="8">init exits after 202 → main starts</text>
+  <path d="M298,140 L262,140" stroke="#51cf66" stroke-width="1.6" fill="none" marker-end="url(#ar-green)"/>
+  <path d="M262,170 L298,170" stroke="#adb5bd" stroke-width="1.2" fill="none" marker-end="url(#ar-grey)"/>
+  <text x="280" y="133" fill="#8ce99a" font-size="8" text-anchor="middle">③ localhost</text>
+  <text x="280" y="184" fill="#adb5bd" font-size="8" text-anchor="middle">status</text>
 
-  <rect x="175" y="142" width="120" height="20" rx="4" fill="#51cf66" opacity="0.25"/>
-  <text x="235" y="156" fill="#51cf66" font-size="9" font-weight="600" text-anchor="middle">✓ Unsealed — Ready</text>
+  <!-- Volumes (mounted into the sidecar) -->
+  <rect x="40" y="235" width="150" height="62" rx="6" fill="#16213e" stroke="#adb5bd" stroke-width="1.2"/>
+  <text x="115" y="253" fill="#dee2e6" font-size="10" font-weight="600" text-anchor="middle">ConfigMap</text>
+  <text x="115" y="269" fill="#adb5bd" font-size="8.5" text-anchor="middle">openbao-unseal-script</text>
+  <text x="115" y="283" fill="#adb5bd" font-size="8.5" text-anchor="middle">files/openbao-auto-unseal.py</text>
 
-  <!-- ==================== IAM (outside cluster) ==================== -->
-  <rect x="35" y="200" width="150" height="46" rx="6" fill="#fab005" opacity="0.85"/>
-  <text x="110" y="219" fill="#1a1a2e" font-size="11" font-weight="700" text-anchor="middle">IAM</text>
-  <text x="110" y="234" fill="#1a1a2e" font-size="8" text-anchor="middle" opacity="0.8">OIDC token → IAM token</text>
+  <rect x="205" y="235" width="150" height="62" rx="6" fill="#16213e" stroke="#4dabf7" stroke-width="1.2"/>
+  <text x="280" y="253" fill="#74c0fc" font-size="10" font-weight="600" text-anchor="middle">projected SA token</text>
+  <text x="280" y="269" fill="#adb5bd" font-size="8.5" text-anchor="middle">audience: workload identity</text>
+  <text x="280" y="283" fill="#adb5bd" font-size="8.5" text-anchor="middle">/var/run/secrets/tokens</text>
 
-  <!-- ① Init → IAM -->
-  <line x1="70" y1="122" x2="70" y2="197" stroke="#ff922b" stroke-width="2" stroke-dasharray="5,3" marker-end="url(#ar-orange)"/>
-  <circle cx="52" cy="182" r="9" fill="#ff922b"/>
-  <text x="52" y="186" fill="#fff" font-size="10" font-weight="700" text-anchor="middle">1</text>
+  <rect x="370" y="235" width="150" height="62" rx="6" fill="#16213e" stroke="#ff922b" stroke-width="1.2"/>
+  <text x="445" y="253" fill="#ffa94d" font-size="10" font-weight="600" text-anchor="middle">Secret openbao-unseal-keys</text>
+  <text x="445" y="269" fill="#adb5bd" font-size="8.5" text-anchor="middle">keys.enc = KMS ciphertext</text>
+  <text x="445" y="283" fill="#adb5bd" font-size="8.5" text-anchor="middle">optional mount</text>
 
-  <!-- ② Init → FunctionGraph async -->
-  <path d="M135,122 V180 H200 V223 H396" fill="none" stroke="#845ef7" stroke-width="2" stroke-dasharray="5,3" marker-end="url(#ar-purple)"/>
-  <text x="300" y="216" fill="#845ef7" font-size="9" text-anchor="middle">async invoke (202) + IAM token</text>
-  <circle cx="300" cy="238" r="9" fill="#845ef7"/>
-  <text x="300" y="242" fill="#fff" font-size="10" font-weight="700" text-anchor="middle">2</text>
+  <path d="M115,235 L115,225 L315,225 L315,218" stroke="#adb5bd" stroke-width="1.1" fill="none" marker-end="url(#ar-grey)"/>
+  <path d="M340,235 L355,218" stroke="#4dabf7" stroke-width="1.2" fill="none" marker-end="url(#ar-blue)"/>
+  <path d="M445,235 L430,217" stroke="#ff922b" stroke-width="1.2" fill="none" marker-end="url(#ar-orange)"/>
 
-  <!-- ==================== FunctionGraph ==================== -->
-  <rect x="400" y="60" width="210" height="200" rx="8" fill="#7048e8" opacity="0.15" stroke="#7048e8" stroke-width="1"/>
-  <text x="505" y="76" fill="#845ef7" font-size="9" text-anchor="middle">FunctionGraph · test-openbao-unseal</text>
+  <!-- T-Cloud services -->
+  <rect x="600" y="62" width="340" height="250" rx="8" fill="none" stroke="#2a4a6b" stroke-width="1.5" stroke-dasharray="6,4"/>
+  <text x="770" y="80" fill="#868e96" font-size="10" text-anchor="middle">T-Cloud APIs (infra stack)</text>
 
-  <rect x="415" y="85" width="180" height="55" rx="6" fill="#7048e8" opacity="0.9"/>
-  <text x="505" y="107" fill="#fff" font-size="12" font-weight="700" text-anchor="middle">Unseal Function</text>
-  <text x="505" y="124" fill="#fff" font-size="9" text-anchor="middle" opacity="0.85">Python · runs inside the VPC</text>
+  <rect x="620" y="95" width="300" height="70" rx="8" fill="#1f2a44" stroke="#4dabf7" stroke-width="1.5"/>
+  <text x="770" y="115" fill="#74c0fc" font-size="11" font-weight="700" text-anchor="middle">IAM · workload identity (OIDC)</text>
+  <text x="770" y="132" fill="#ced4da" font-size="9" text-anchor="middle">sub = system:serviceaccount:openbao:openbao</text>
+  <text x="770" y="147" fill="#ced4da" font-size="9" text-anchor="middle">→ IAM group with role ${name_prefix}-kms-decrypt</text>
 
-  <rect x="415" y="150" width="180" height="38" rx="5" fill="#5f3dc4" opacity="0.6"/>
-  <text x="505" y="166" fill="#e9ecef" font-size="9" text-anchor="middle">↻ retry every 5 s (max 10×)</text>
-  <text x="505" y="179" fill="#e9ecef" font-size="8" text-anchor="middle" opacity="0.75">until the pod answers; skips if unsealed</text>
+  <rect x="620" y="185" width="300" height="70" rx="8" fill="#1f2a44" stroke="#ff922b" stroke-width="1.5"/>
+  <text x="770" y="205" fill="#ffa94d" font-size="11" font-weight="700" text-anchor="middle">KMS key ${name_prefix}-openbao-unseal-*</text>
+  <text x="770" y="222" fill="#ced4da" font-size="9" text-anchor="middle">decrypt-data · role scoped to kms:::KeyId:&lt;this key&gt;</text>
+  <text x="770" y="237" fill="#ced4da" font-size="9" text-anchor="middle">plain_text = base64("key1,key2,…")</text>
 
-  <rect x="415" y="198" width="180" height="50" rx="5" fill="#1a1a2e" opacity="0.6"/>
-  <text x="505" y="216" fill="#adb5bd" font-size="8.5" text-anchor="middle">agency test-openbao-unseal</text>
-  <text x="505" y="230" fill="#adb5bd" font-size="8" text-anchor="middle">OBS read · KMS decrypt · VPC access</text>
+  <path d="M520,125 L618,125" stroke="#4dabf7" stroke-width="1.5" fill="none" marker-end="url(#ar-blue)"/>
+  <text x="560" y="118" fill="#74c0fc" font-size="8.5" text-anchor="middle">① SA token</text>
+  <path d="M520,200 L618,200" stroke="#ff922b" stroke-width="1.5" fill="none" marker-end="url(#ar-orange)"/>
+  <text x="560" y="193" fill="#ffa94d" font-size="8.5" text-anchor="middle">② ciphertext</text>
 
-  <!-- ④ FG → OpenBao: PUT /v1/sys/unseal -->
-  <line x1="415" y1="97" x2="298" y2="97" stroke="#51cf66" stroke-width="2.5" stroke-dasharray="6,3" marker-end="url(#ar-green)"/>
-  <text x="356" y="89" fill="#51cf66" font-size="8.5" text-anchor="middle">PUT /v1/sys/unseal</text>
-  <circle cx="356" cy="114" r="9" fill="#51cf66"/>
-  <text x="356" y="118" fill="#fff" font-size="10" font-weight="700" text-anchor="middle">4</text>
-
-  <!-- ==================== OBS + KMS ==================== -->
-  <rect x="700" y="70" width="220" height="55" rx="6" fill="#228be6" opacity="0.9"/>
-  <text x="810" y="93" fill="#fff" font-size="12" font-weight="700" text-anchor="middle">OBS</text>
-  <text x="810" y="110" fill="#fff" font-size="9" text-anchor="middle" opacity="0.85">test-openbao-unseal · openbao-unseal/keys.enc</text>
-
-  <rect x="700" y="165" width="220" height="55" rx="6" fill="#20c997" opacity="0.9"/>
-  <text x="810" y="188" fill="#fff" font-size="12" font-weight="700" text-anchor="middle">KMS</text>
-  <text x="810" y="205" fill="#fff" font-size="9" text-anchor="middle" opacity="0.85">decrypt unseal keys</text>
-
-  <!-- ③ FG → OBS (read), FG → KMS (decrypt) -->
-  <path d="M595,112 H640 V97 H697" fill="none" stroke="#4dabf7" stroke-width="2" stroke-dasharray="5,3" marker-end="url(#ar-blue)"/>
-  <text x="670" y="90" fill="#4dabf7" font-size="8.5" text-anchor="middle">read</text>
-  <path d="M595,128 H640 V192 H697" fill="none" stroke="#20c997" stroke-width="2" stroke-dasharray="5,3" marker-end="url(#ar-teal)"/>
-  <text x="670" y="185" fill="#20c997" font-size="8.5" text-anchor="middle">decrypt</text>
-  <circle cx="660" cy="145" r="9" fill="#4dabf7"/>
-  <text x="660" y="149" fill="#fff" font-size="10" font-weight="700" text-anchor="middle">3</text>
-
-  <!-- ==================== Flow strip ==================== -->
-  <rect x="20" y="282" width="920" height="124" rx="8" fill="#0d1b2a" stroke="#2a4a6b" stroke-width="1"/>
-  <text x="480" y="302" fill="#e9ecef" font-size="11" font-weight="700" text-anchor="middle">Auto-unseal flow (on every OpenBao pod start)</text>
-
-  <rect x="40" y="316" width="170" height="48" rx="6" fill="#1e2a4a" stroke="#ff922b" stroke-width="1.5"/>
-  <text x="125" y="335" fill="#ff922b" font-size="11" font-weight="700" text-anchor="middle">① OIDC token</text>
-  <text x="125" y="352" fill="#adb5bd" font-size="8.5" text-anchor="middle">projected SA token → IAM token</text>
-
-  <rect x="232" y="316" width="170" height="48" rx="6" fill="#1e2a4a" stroke="#845ef7" stroke-width="1.5"/>
-  <text x="317" y="335" fill="#845ef7" font-size="11" font-weight="700" text-anchor="middle">② Async invoke</text>
-  <text x="317" y="352" fill="#adb5bd" font-size="8.5" text-anchor="middle">FunctionGraph · 202 · init exits</text>
-
-  <rect x="424" y="316" width="170" height="48" rx="6" fill="#1e2a4a" stroke="#4dabf7" stroke-width="1.5"/>
-  <text x="509" y="335" fill="#4dabf7" font-size="11" font-weight="700" text-anchor="middle">③ Read + decrypt</text>
-  <text x="509" y="352" fill="#adb5bd" font-size="8.5" text-anchor="middle">keys.enc from OBS · KMS decrypt</text>
-
-  <rect x="616" y="316" width="170" height="48" rx="6" fill="#1e2a4a" stroke="#51cf66" stroke-width="1.5"/>
-  <text x="701" y="335" fill="#51cf66" font-size="11" font-weight="700" text-anchor="middle">④ Unseal</text>
-  <text x="701" y="352" fill="#adb5bd" font-size="8.5" text-anchor="middle">PUT /v1/sys/unseal per key</text>
-
-  <rect x="808" y="316" width="112" height="48" rx="6" fill="#2b5a1e" stroke="#51cf66" stroke-width="1.5"/>
-  <text x="864" y="337" fill="#51cf66" font-size="15" font-weight="700" text-anchor="middle">✓</text>
-  <text x="864" y="353" fill="#adb5bd" font-size="8.5" text-anchor="middle">pod Ready</text>
-
-  <line x1="210" y1="340" x2="229" y2="340" stroke="#adb5bd" stroke-width="1.5" marker-end="url(#ar-grey)"/>
-  <line x1="402" y1="340" x2="421" y2="340" stroke="#adb5bd" stroke-width="1.5" marker-end="url(#ar-grey)"/>
-  <line x1="594" y1="340" x2="613" y2="340" stroke="#adb5bd" stroke-width="1.5" marker-end="url(#ar-grey)"/>
-  <line x1="786" y1="340" x2="805" y2="340" stroke="#adb5bd" stroke-width="1.5" marker-end="url(#ar-grey)"/>
-
-  <text x="480" y="390" fill="#868e96" font-size="9" font-style="italic" text-anchor="middle">No unseal keys in the cluster, no sidecars, no alarms — each pod triggers its own unseal (Workload Identity → docs/workload-identity.md)</text>
+  <!-- Setup -->
+  <rect x="20" y="330" width="920" height="92" rx="8" fill="#16213e" stroke="#2a4a6b" stroke-width="1"/>
+  <text x="40" y="352" fill="#e9ecef" font-size="11" font-weight="700">Setup</text>
+  <text x="40" y="372" fill="#ced4da" font-size="9.5">openbao-init.sh → init, unseal, raft join → upload-unseal-keys.py: checks env + cluster ID, KMS encrypt → Secret openbao-unseal-keys</text>
+  <text x="40" y="390" fill="#ced4da" font-size="9.5">Every pod start or OpenBao container restart: the sidecar unseals within seconds. Deliberate seal: scripts/openbao-seal.sh (pauses all sidecars, then seals).</text>
+  <text x="40" y="408" fill="#868e96" font-size="9">Plaintext shares exist only in the sidecar's memory (python:3.12-alpine, stdlib) and on 127.0.0.1 — never in argv, files or logs.</text>
 </svg>

@@ -1062,11 +1062,14 @@ def _chat_worker(slot: Slot, req: ChatRequest, out: queue.Queue, stop: threading
 
             t = threading.Thread(target=generate_thread, daemon=True)
             t.start()
-            for text in streamer:
-                if text:
-                    chunks += 1
-                    out.put({"token": text})
-            t.join()
+            try:
+                for text in streamer:
+                    if text:
+                        chunks += 1
+                        out.put({"token": text})
+            finally:
+                stop.set()
+                t.join()  # generation owns the slot even if the stream reader timed out
             if failure:
                 raise failure[0]
         out.put({"done": True, "seconds": round(time.monotonic() - start, 2), "chunks": chunks, "model": CHAT_MODEL})

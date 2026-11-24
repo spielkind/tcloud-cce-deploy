@@ -75,7 +75,7 @@ jobs:
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.OTC_ACCESS_KEY }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.OTC_SECRET_KEY }}
-        run: tofu init -input=false -backend-config="envs/${DEPLOY_ENV}.backend.tfvars"
+        run: bash ../scripts/init-stack.sh workloads
 
       - name: OpenTofu Destroy Plan (Workloads)
         working-directory: workloads
@@ -97,7 +97,7 @@ jobs:
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.OTC_ACCESS_KEY }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.OTC_SECRET_KEY }}
-        run: tofu init -input=false -backend-config="envs/${DEPLOY_ENV}.backend.tfvars"
+        run: bash ../scripts/init-stack.sh infra
 
       - name: OpenTofu Destroy Plan (Infra)
         working-directory: infra
@@ -126,13 +126,9 @@ jobs:
           AWS_ACCESS_KEY_ID: ${{ secrets.OTC_ACCESS_KEY }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.OTC_SECRET_KEY }}
         run: |
-          # FunctionGraph leaves its VPC access ports in the node subnet and SWR
-          # refuses to delete organizations with repositories — both block the
-          # destroy. Remove the function first, clean up, then destroy the rest.
-          NETWORK_ID=$(tofu output -raw subnet_id 2>/dev/null || true)
+          # SWR refuses to delete organizations with repositories: empty it first.
           SWR_ORG=$(tofu output -raw swr_organization 2>/dev/null || true)
-          tofu destroy -var-file="envs/${DEPLOY_ENV}.tfvars" -auto-approve -input=false -target=module.openbao_unseal -target=module.openbao_vm
-          python3 ../scripts/destroy-cleanup.py --network-id "$NETWORK_ID" --swr-org "$SWR_ORG"
+          python3 ../scripts/destroy-cleanup.py --swr-org "$SWR_ORG"
           tofu plan -destroy -var-file="envs/${DEPLOY_ENV}.tfvars" -out=destroy-final.tfplan -input=false
           tofu apply -input=false destroy-final.tfplan
 

@@ -447,8 +447,8 @@ export BAO_ADDR BAO_CACERT
 # Token with sys/storage/raft/snapshot read capability
 # Created during post-init setup: see /etc/openbao/snapshot-token.env
 if [ ! -f /etc/openbao/snapshot-token.env ]; then
-  echo "SKIP: /etc/openbao/snapshot-token.env not found — run bao-snapshot-setup.sh first"
-  exit 0
+  echo "ERROR: snapshot token missing — run bao-snapshot-setup.sh first" >&2
+  exit 1
 fi
 source /etc/openbao/snapshot-token.env
 export BAO_TOKEN
@@ -462,9 +462,11 @@ echo "=== OpenBao Raft Snapshot Backup ==="
 echo "  Timestamp: $${TIMESTAMP}"
 
 if ! bao status -format=json 2>/dev/null | jq -e '.sealed == false' &>/dev/null; then
-  echo "  SKIP: OpenBao is sealed or unreachable"
-  exit 0
+  echo "  ERROR: OpenBao is sealed or unreachable" >&2
+  exit 1
 fi
+
+bao token renew >/dev/null || { echo "Snapshot token renewal failed; re-run bao-snapshot-setup.sh with an admin token." >&2; exit 1; }
 
 # shellcheck source=/dev/null
 source /usr/local/lib/openbao/agency-creds.sh
@@ -533,9 +535,12 @@ bao policy write snapshot-backup - <<'POLICY'
 path "sys/storage/raft/snapshot" {
   capabilities = ["read"]
 }
+path "auth/token/renew-self" {
+  capabilities = ["update"]
+}
 POLICY
 
-# Create a periodic orphan token (auto-renews, no parent dependency)
+# The backup job explicitly renews this orphan token before taking a snapshot.
 echo '  Creating periodic token (period=768h / 32 days)...'
 TOKEN_JSON=$(bao token create \
   -policy=snapshot-backup \
@@ -569,7 +574,7 @@ rm -f "$${CIPHER_FILE}"
 echo "  Token encrypted with KMS and backed up to OBS (config/snapshot-token.enc)"
 
 echo "  Token stored in /etc/openbao/snapshot-token.env"
-echo "  Period: 768h (auto-renews on use, no expiry as long as used within period)"
+echo "  Period: 768h (renewed by each backup job)"
 echo ""
 echo "  Backup will run automatically every 6 hours via /etc/cron.d/bao-snapshot"
 echo "  Manual run: sudo bao-snapshot.sh"
@@ -578,7 +583,7 @@ chmod 755 /usr/local/bin/bao-snapshot-setup.sh
 
 cat > /etc/cron.d/bao-snapshot <<'CRONEOF'
 # OpenBao Raft snapshot backup — every 6 hours with random delay up to 10 min
-23 */6 * * * root perl -e 'sleep int(rand(600))' && /usr/local/bin/bao-snapshot.sh 2>&1 | logger -t bao-snapshot
+23 */6 * * * root perl -e 'sleep int(rand(600))' && /bin/bash -o pipefail -c '/usr/local/bin/bao-snapshot.sh 2>&1 | logger -t bao-snapshot' || logger -p daemon.err -t bao-snapshot 'Snapshot failed; check last successful OBS upload'
 CRONEOF
 chmod 644 /etc/cron.d/bao-snapshot
 

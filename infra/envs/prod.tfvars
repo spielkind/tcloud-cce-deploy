@@ -1,7 +1,7 @@
 # STATUS: template — prod is not configured yet. Fill in real values and remove this line to enable it.
 # =============================================================================
 # prod — self-contained environment configuration
-#   tofu init  -backend-config=envs/prod.backend.tfvars
+#   export TF_VAR_environment=prod; bash ../scripts/init-stack.sh infra
 #   tofu apply -var-file=envs/prod.tfvars
 # Credentials and otc_project_name come from TF_VAR_* environment variables.
 # =============================================================================

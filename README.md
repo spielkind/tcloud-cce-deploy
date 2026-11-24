@@ -37,7 +37,7 @@ Further documentation (index: [docs/README.md](docs/README.md), diagrams in [doc
 | Monitoring options and trade-offs (not implemented) | [docs/monitoring.md](docs/monitoring.md) |
 | OpenBao in the cluster (`openbao_mode = "cce"`) | [docs/openbao.md](docs/openbao.md) |
 | OpenBao on dedicated VMs (`openbao_mode = "vm"`) | [docs/openbao-vm.md](docs/openbao-vm.md) |
-| Auto-unseal with FunctionGraph + KMS (cce mode) | [docs/openbao-unseal.md](docs/openbao-unseal.md) |
+| Auto-unseal with a native sidecar + KMS (cce mode) | [docs/openbao-unseal.md](docs/openbao-unseal.md) |
 | Workload identity (OIDC, no AK/SK in pods) | [docs/workload-identity.md](docs/workload-identity.md) |
 | OpenBao demo app (both modes) | [docs/demo-app.md](docs/demo-app.md) |
 | GPU node pool + GPU AI playground (image, chat, speech, vision) + GPU slicing (xGPU) | [docs/gpu.md](docs/gpu.md) |
@@ -50,12 +50,10 @@ Further documentation (index: [docs/README.md](docs/README.md), diagrams in [doc
 ├── bootstrap/
 │   └── main.tf                    # OBS state bucket + KMS key (local state, base project)
 ├── infra/                         # Infra stack: VPC, CCE, addons, DNS, NAT, SWR, OpenBao infra
-│   ├── backend.tf                 # S3 backend (written by scripts/bootstrap.sh; key per env)
+│   ├── backend.tf                 # S3 backend (written by scripts/bootstrap.sh; key = <environment>/infra/...)
 │   ├── envs/
 │   │   ├── dev.tfvars             # complete dev configuration
-│   │   ├── dev.backend.tfvars     # key = "dev/infra/terraform.tfstate"
-│   │   ├── prod.tfvars            # complete prod configuration
-│   │   └── prod.backend.tfvars    # key = "prod/infra/terraform.tfstate"
+│   │   └── prod.tfvars            # prod template
 │   ├── terraform.tfvars.example   # every input with its default (documentation only)
 │   ├── main.tf                    # providers (project + regional provider)
 │   ├── variables.tf
@@ -83,12 +81,12 @@ Further documentation (index: [docs/README.md](docs/README.md), diagrams in [doc
 │       │   └── variables.tf, outputs.tf, versions.tf
 │       ├── dns/                   # public/private DNS zone
 │       ├── swr/                   # SWR organization (random suffix)
-│       ├── openbao-unseal/        # cce mode: KMS + OBS + FunctionGraph auto-unseal
+│       ├── openbao-unseal/        # cce mode: KMS key + decrypt role for the auto-unseal sidecar
 │       ├── workload-identity/     # cce mode: IAM OIDC identity provider + mappings
 │       └── openbao/               # vm mode: dedicated OpenBao Raft cluster on ECS
 ├── workloads/                     # Workloads stack (Helm), separate state
 │   ├── backend.tf                 # S3 backend + terraform_remote_state of infra
-│   ├── envs/                      # dev/prod .tfvars + .backend.tfvars
+│   ├── envs/                      # dev/prod .tfvars
 │   ├── terraform.tfvars.example
 │   ├── main.tf                    # helm/kubernetes providers from infra outputs
 │   ├── variables.tf, outputs.tf
@@ -104,13 +102,16 @@ Further documentation (index: [docs/README.md](docs/README.md), diagrams in [doc
 ├── docs/                          # detailed docs (index: docs/README.md)
 │   └── diagrams/                  # SVG diagrams
 ├── scripts/
-│   ├── bootstrap.sh               # runs bootstrap/, writes backend.tf + envs/*.backend.tfvars
+│   ├── bootstrap.sh               # runs bootstrap/, writes both backend.tf files
+│   ├── init-stack.sh              # tofu init for TF_VAR_environment, checks the state key
 │   ├── openbao-init.sh            # cce mode only: init, unseal, raft join, auth, key upload
 │   ├── demo-app-openbao-setup.sh  # both modes: policy, Kubernetes role, demo secret
 │   ├── gpu-demo-openbao-setup.sh  # both modes: Hugging Face token → kv/gpu-demo/hf, policy + role
-│   ├── upload-unseal-keys.py      # cce mode: KMS-encrypt unseal keys → OBS
-│   ├── test-kms-obs.py            # KMS/OBS round-trip test for the unseal setup
-│   └── destroy-cleanup.py         # FunctionGraph VPC ports + SWR repositories before destroy
+│   ├── upload-unseal-keys.py      # cce mode: KMS-encrypt unseal keys → Secret openbao-unseal-keys
+│   ├── openbao-seal.sh            # cce mode: pause auto-unseal and seal deliberately
+│   ├── lib-openbao-target.sh      # shared: cluster from infra state, KUBECONFIG check
+│   ├── test-kms.py                # KMS round-trip test for the unseal setup
+│   └── destroy-cleanup.py         # empties the SWR organization before destroy
 └── .github/workflows/
     ├── deploy.yml                 # Infra → Build Images (optional) → Workloads
     ├── destroy.yml                # Workloads → OpenBao modules → cleanup → Infra
@@ -123,12 +124,12 @@ Further documentation (index: [docs/README.md](docs/README.md), diagrams in [doc
 
 Both stacks are configured **only** through per-environment files; there is no shared root `terraform.tfvars` any more:
 
-| Stack | Variables | Backend key file | State object |
-|---|---|---|---|
-| `infra/` | `envs/<env>.tfvars` | `envs/<env>.backend.tfvars` | `<env>/infra/terraform.tfstate` |
-| `workloads/` | `envs/<env>.tfvars` | `envs/<env>.backend.tfvars` | `<env>/workloads/terraform.tfstate` |
+| Stack | Variables | State object |
+|---|---|---|
+| `infra/` | `envs/<env>.tfvars` | `<env>/infra/terraform.tfstate` |
+| `workloads/` | `envs/<env>.tfvars` | `<env>/workloads/terraform.tfstate` |
 
-`<env>` is `dev` or `prod` (validated by the `environment` variable in both stacks). Workloads read the infra outputs from `<environment>/infra/terraform.tfstate` via `terraform_remote_state`, so `environment` in `workloads/envs/<env>.tfvars` must match. In CI, the `environment` input of the Deploy/Destroy workflow selects the files (and sets `TF_VAR_environment`).
+`environment` (`dev` or `prod`, no default) selects both the backend key (`key = "${var.environment}/<stack>/terraform.tfstate"`) and the infra state read by workloads. CI exports `TF_VAR_environment` from the workflow choice. For local use export it for **all** commands, including `output`; `scripts/init-stack.sh <stack>` runs `tofu init -reconfigure` and checks the selected key.
 
 `terraform.tfvars.example` documents all inputs but is not read. All configuration lives in `envs/<env>.tfvars`; root `terraform.tfvars` files are gitignored (they would be auto-loaded) and are not used.
 
@@ -193,7 +194,7 @@ Both are always created in the region's **base project** (e.g. `eu-de`), indepen
 | SWR organization | `<name_prefix>-<random>` for the demo images |
 | CTS tracker | System tracker with KMS-encrypted OBS audit bucket, traces also in LTS (`create_cts_tracker`) |
 | VPC flow log | Optional flow log of the cluster VPC into its own LTS stream (`vpc_flow_log_enabled`) |
-| OpenBao (cce mode) | KMS + OBS + FunctionGraph auto-unseal and OIDC workload identity (optional) |
+| OpenBao (cce mode) | Auto-unseal sidecar with KMS and OIDC workload identity (optional) |
 | OpenBao (vm mode) | Dedicated VPC, NAT, ELB, 3 ECS Raft nodes, bastion, KMS, OBS, agency, LTS |
 
 All resources are tagged with `tags` plus `environment = <environment>`.
@@ -204,7 +205,7 @@ All resources are tagged with `tags` plus `environment = <environment>`.
 |---|---|
 | cert-manager | `v1.21.3` + ClusterIssuer `letsencrypt-prod` (HTTP-01 via nginx) |
 | podinfo | `6.17.0`, `https://hello.<zone>` (`create_podinfo`) |
-| OpenBao (cce mode) | Helm chart `0.30.8` (OpenBao v2.7.3): 3-replica HA Raft + agent injector at `https://openbao.<zone>`, auto-unseal init container |
+| OpenBao (cce mode) | Helm chart `0.30.8` (OpenBao v2.7.3): 3-replica HA Raft + agent injector at `https://openbao.<zone>`, auto-unseal sidecar |
 | OpenBao (vm mode) | Same chart, **injector only** (`externalBaoAddr` = VM URL) + token reviewer ServiceAccount |
 | Demo app | Flask app reading/writing OpenBao secrets, `https://demo.<zone>` (both modes) |
 | GPU demo | GPU AI playground (image, chat, speech, vision) on the GPU pool, `https://aidemo.<zone>` |
@@ -246,12 +247,12 @@ Roles assigned to the group:
 | Role | Purpose |
 |---|---|
 | `Security Administrator` | IAM agencies, custom roles, identity providers |
-| `OBS Administrator` | State bucket, unseal/snapshot/audit buckets |
+| `OBS Administrator` | State bucket, VM-mode unseal/snapshot buckets, audit bucket |
 | `KMS Administrator` | KMS keys |
 | `SWR Administrator` | Container registry |
 | `LTS Administrator`, `LTS FullAccess` | Log Tank Service |
 
-Optional features need the corresponding service permissions as well (FunctionGraph for cce auto-unseal, CTS for `create_cts_tracker`).
+Optional features need the corresponding service permissions as well (KMS and IAM identity providers for cce auto-unseal, CTS for `create_cts_tracker`).
 
 ### IAM agencies (`cce_admin_trust` and `EVSAccessKMS`)
 
@@ -309,9 +310,9 @@ The script:
 
 1. Applies `bootstrap/` (state bucket + KMS key in the region's base project). The bootstrap **state is local** (`bootstrap/terraform.tfstate`, gitignored) — keep a backup; losing it only means re-importing bucket and key.
 2. Writes the backend configuration for both stacks (`infra/backend.tf`, `workloads/backend.tf` incl. the `terraform_remote_state` of infra).
-3. Writes `envs/dev.backend.tfvars` and `envs/prod.backend.tfvars` for `infra/` and `workloads/` (state keys `<env>/<stack>/terraform.tfstate`).
+   The state key comes from `var.environment` (`<env>/<stack>/terraform.tfstate`).
 
-Commit the regenerated `backend.tf` and `envs/*.backend.tfvars` files (they contain no credentials). Re-running bootstrap after its state was lost creates a **new** bucket name.
+Commit the regenerated `backend.tf` files (they contain no credentials). Re-running bootstrap after its state was lost creates a **new** bucket name.
 
 To remove the backend later: empty the versioned bucket (all object versions), then `tofu -chdir=bootstrap destroy` with the same `TF_VAR_*` variables.
 
@@ -327,7 +328,7 @@ Triggers: manual (**Actions → Deploy → Run workflow**) and pull requests to 
 
 | Input | Default | Meaning |
 |---|---|---|
-| `environment` | `dev` | `dev` or `prod` — selects `envs/<env>.tfvars` / `envs/<env>.backend.tfvars` |
+| `environment` | `dev` | `dev` or `prod` — selects the state key and `envs/<env>.tfvars` |
 | `apply` | `false` | Apply the plans; without it the run is plan-only |
 | `build_images` | `false` | Build and push container images to SWR |
 
@@ -344,9 +345,8 @@ Inputs: `environment` (`dev`/`prod`, default `dev`), `apply`, `confirm` (must be
 Order with `apply`:
 
 1. `tofu destroy` of **workloads** (Helm releases, PVC-backed OpenBao, …).
-2. Targeted destroy of `module.openbao_unseal` and `module.openbao_vm` in infra.
-3. `scripts/destroy-cleanup.py` — deletes FunctionGraph VPC access ports left in the node subnet and empties the SWR organization (both block the destroy otherwise).
-4. Saved destroy plan for the rest of infra (`plan -destroy -out=destroy-final.tfplan`) and `apply` of that plan.
+2. `scripts/destroy-cleanup.py` — empties the SWR organization (SWR refuses to delete organizations with repositories).
+3. Saved destroy plan for the rest of infra (`plan -destroy -out=destroy-final.tfplan`) and `apply` of that plan.
 
 The bootstrap bucket and key are never touched. Deleted KMS keys stay *pending deletion* for 7 days; key aliases carry random suffixes so destroy + redeploy works within that window.
 
@@ -371,22 +371,20 @@ export TF_VAR_otc_domain_name="your-domain"
 export TF_VAR_otc_project_name="eu-de_<project>"
 export AWS_ACCESS_KEY_ID="$TF_VAR_otc_access_key"
 export AWS_SECRET_ACCESS_KEY="$TF_VAR_otc_secret_key"
-ENV=dev
+export TF_VAR_environment=dev
 
 # Infra
-cd infra
-tofu init -reconfigure -backend-config=envs/$ENV.backend.tfvars
-tofu plan  -var-file=envs/$ENV.tfvars -out=tfplan
-tofu apply tfplan
+bash scripts/init-stack.sh infra
+tofu -chdir=infra plan  -var-file="envs/$TF_VAR_environment.tfvars" -out=tfplan
+tofu -chdir=infra apply tfplan
 
 # Workloads (after infra)
-cd ../workloads
-tofu init -reconfigure -backend-config=envs/$ENV.backend.tfvars
-tofu plan  -var-file=envs/$ENV.tfvars -out=tfplan
-tofu apply tfplan
+bash scripts/init-stack.sh workloads
+tofu -chdir=workloads plan  -var-file="envs/$TF_VAR_environment.tfvars" -out=tfplan
+tofu -chdir=workloads apply tfplan
 ```
 
-Use `-reconfigure` when switching between `dev` and `prod` in the same working copy. The helper scripts (`openbao-init.sh`, `demo-app-openbao-setup.sh`, `upload-unseal-keys.py`, `test-kms-obs.py`) read `tofu output` from the locally initialized `infra/` / `workloads/` directories, so initialize them for the environment you want to operate on.
+Switching between `dev` and `prod` in the same working copy: export the other environment and run `init-stack.sh` again (it uses `-reconfigure`). OBS does not lock the state, so never run a local write concurrently with CI or another writer for the same environment. The helper scripts (`openbao-init.sh`, `demo-app-openbao-setup.sh`, `upload-unseal-keys.py`, `test-kms.py`) read `tofu output` from the locally initialized `infra/` / `workloads/` directories, so initialize them for the environment you want to operate on.
 
 > ⚠️ Do **not** set `AWS_SESSION_TOKEN` — OBS rejects the credentials (`InvalidAccessKeyId`).
 
@@ -399,9 +397,9 @@ Use `-reconfigure` when switching between `dev` and `prod` in the same working c
 | | `disabled` | `cce` | `vm` |
 |---|---|---|---|
 | Where OpenBao runs | — | In CCE: Helm chart `0.30.8`, 3 Raft replicas on EVS PVCs | 3 ECS instances (one per AZ) in an own VPC, Raft on encrypted EVS |
-| Created by infra | — | `create_openbao_unseal`: KMS + OBS + FunctionGraph; `create_workload_identity`: OIDC IdP | `module.openbao_vm`: VPC, NAT, ELB `:443`/`:8200`, ECS, bastion, KMS, OBS, agency, LTS |
-| Created by workloads (`create_openbao = true`) | — | OpenBao server + injector, unseal init container | Injector only (`externalBaoAddr` = `openbao_vm_url`) + `openbao-token-reviewer` SA |
-| Unseal | — | FunctionGraph triggered by an init container ([auto-unseal](docs/openbao-unseal.md)) | KMS via ECS agency (`openbao-unseal.service` on every boot) |
+| Created by infra | — | `create_openbao_unseal`: KMS key + decrypt role; `create_workload_identity`: OIDC IdP | `module.openbao_vm`: VPC, NAT, ELB `:443`/`:8200`, ECS, bastion, KMS, OBS, agency, LTS |
+| Created by workloads (`create_openbao = true`) | — | OpenBao server + injector, auto-unseal sidecar | Injector only (`externalBaoAddr` = `openbao_vm_url`) + `openbao-token-reviewer` SA |
+| Unseal | — | Native sidecar per pod: KMS decrypt via workload identity, unseal via 127.0.0.1 ([auto-unseal](docs/openbao-unseal.md)) | KMS via ECS agency (`openbao-unseal.service` on every boot) |
 | TLS | — | Let's Encrypt via cert-manager at the ingress | Let's Encrypt DNS-01 on the bastion or BYO certificate; verified end-to-end |
 | Initialization | — | `scripts/openbao-init.sh` | `sudo bao-init.sh` on the bastion |
 | Demo app setup | — | `scripts/demo-app-openbao-setup.sh` (userpass) | `scripts/demo-app-openbao-setup.sh` (AppRole) |
@@ -571,7 +569,7 @@ Every `*_version` addon variable accepts a pinned version or `"latest"`, which r
 | Variable | Default | Description |
 |---|---|---|
 | `openbao_mode` | `cce` | `disabled`, `cce` or `vm` (see [OpenBao Modes](#openbao-modes)) |
-| `create_openbao_unseal` | `false` | cce mode: KMS + OBS + FunctionGraph auto-unseal |
+| `create_openbao_unseal` | `false` | cce mode: KMS key + decrypt role for the auto-unseal sidecar (needs `create_workload_identity`) |
 | `create_workload_identity` | `false` | cce mode: OIDC identity provider; requires `bind_api_eip = true` (validated) |
 | `openbao_vm` | object, see [openbao-vm.md](docs/openbao-vm.md#configuration) | vm mode: VPC/subnet, AZs, flavor, image, version, TLS, `api_allowed_cidrs`, bastion, LTS, bandwidths |
 
@@ -622,7 +620,7 @@ Every `*_version` addon variable accepts a pinned version or `"latest"`, which r
 | `ingress_elb_public_ip`, `dns_zone_name`, `lts_group_id`, `lts_hostfile_stream_id`, `cts_audit_bucket` | Ingress, DNS, logging, audit |
 | `swr_organization`, `swr_endpoint` | Registry |
 | `openbao_mode` | Selected OpenBao mode (read by workloads) |
-| `openbao_unseal_kms_key_id`, `openbao_unseal_obs_bucket`, `openbao_unseal_function_urn` | cce auto-unseal |
+| `openbao_unseal_kms_key_id` | cce auto-unseal (KMS key for `upload-unseal-keys.py`) |
 | `workload_identity_provider_id`, `workload_identity_client_id` | cce workload identity |
 | `openbao_vm_url`, `openbao_vm_ca_cert`, `openbao_vm_elb_public_ip`, `openbao_vm_bastion_public_ip`, `openbao_vm_nat_public_ip`, `openbao_vm_ssh_private_key` (s) | vm mode |
 
@@ -700,7 +698,7 @@ The new code uses different state keys (`<env>/infra/…`, `<env>/workloads/…`
 
 1. **Destroy with the old code** — run **Actions → Destroy** (Apply + `destroy`) from `origin/main` *before* this change is pushed (old state keys `cce/terraform.tfstate`, `cce/apps.tfstate`).
 2. **Push the new code.**
-3. Optionally re-run `./scripts/bootstrap.sh` (regenerates `backend.tf` and `envs/*.backend.tfvars`; the existing bucket is kept as long as the local bootstrap state exists).
+3. Optionally re-run `./scripts/bootstrap.sh` (regenerates both `backend.tf` files; the existing bucket is kept as long as the local bootstrap state exists).
 4. **Actions → Deploy** with `environment = dev`, **Apply** and **Build Images** (the new SWR organization is empty). dev keeps `name_prefix = "test"`, so the resources get the same `test-…` names as before.
 5. cce mode: `./scripts/openbao-init.sh`, then `./scripts/demo-app-openbao-setup.sh`.
 
@@ -719,7 +717,7 @@ The new code uses different state keys (`<env>/infra/…`, `<env>/workloads/…`
 - Worker volumes optionally encrypted with a dedicated KMS key (yearly rotation) and master volumes optionally encrypted — enabled in dev and prod, see [optional hardening](#optional-hardening-volume-encryption)
 - Worker SSH closed by default; NodePorts limited to the VPC except where the ingress ELB needs them; node 80/443 opt-in
 - CCE API internal unless `bind_api_eip`; restrict it with `api_access_trustlist`
-- OpenBao unseal keys stored KMS-encrypted in OBS; root tokens revoked after initialization (both modes)
+- OpenBao unseal keys stored only KMS-encrypted (cce: Secret, vm: OBS); root tokens revoked after initialization (both modes)
 - vm mode: API and bastion CIDRs must not be `/0`, TLS verified everywhere
 - Destroy requires typing `destroy`
 
@@ -742,7 +740,7 @@ The new code uses different state keys (`<env>/infra/…`, `<env>/workloads/…`
 | Missing project name | Set `TF_VAR_otc_project_name` locally or the `OTC_PROJECT_NAME` repository variable. |
 | OpenBao pods `0/1 Ready` after deploy (cce) | Expected until `./scripts/openbao-init.sh` has run. |
 | VM OpenBao unreachable from pods / your machine | Source IP not in `openbao_vm.api_allowed_cidrs` (the CCE NAT EIP is added automatically) — see [openbao-vm.md](docs/openbao-vm.md#troubleshooting). |
-| Destroy hangs on subnet/VPC or SWR | Run `scripts/destroy-cleanup.py --network-id <subnet_id> --swr-org <swr_organization>` (done by the Destroy workflow). |
+| Destroy hangs on the SWR organization | Run `scripts/destroy-cleanup.py --swr-org <swr_organization>` (done by the Destroy workflow). |
 
 ```bash
 tofu -chdir=infra output -raw kubeconfig > ~/.kube/config

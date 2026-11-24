@@ -36,13 +36,6 @@ log "Updating backend config..."
 tofu output -raw backend_config > "${INFRA_DIR}/backend.tf"
 tofu output -raw workloads_backend_config > "${WORKLOADS_DIR}/backend.tf"
 
-# Per-environment state keys: <env>/<stack>/terraform.tfstate
-mkdir -p "${INFRA_DIR}/envs" "${WORKLOADS_DIR}/envs"
-for env in dev prod; do
-  tofu output -json backend_tfvars | jq -j --arg env "$env" '.[$env].infra' > "${INFRA_DIR}/envs/${env}.backend.tfvars"
-  tofu output -json backend_tfvars | jq -j --arg env "$env" '.[$env].workloads' > "${WORKLOADS_DIR}/envs/${env}.backend.tfvars"
-done
-
 BUCKET=$(tofu output -raw bucket_name)
 KMS_ID=$(tofu output -raw kms_key_id)
 
@@ -52,6 +45,6 @@ log "   OBS Bucket: ${BUCKET}"
 log "   KMS Key:    ${KMS_ID}"
 log "   Infra Backend: ${INFRA_DIR}/backend.tf (updated)"
 log "   Workloads Backend: ${WORKLOADS_DIR}/backend.tf (updated)"
-log "   State keys: <dev|prod>/<infra|workloads>/terraform.tfstate (envs/*.backend.tfvars)"
+log "   State keys: <dev|prod>/<infra|workloads>/terraform.tfstate"
 echo ""
-log "Next: cd infra && tofu init -backend-config=envs/dev.backend.tfvars && tofu apply -var-file=envs/dev.tfvars"
+log "Next (from repo root): export TF_VAR_environment=dev; bash scripts/init-stack.sh infra"

@@ -2,6 +2,8 @@
 *.tfstate
 *.tfstate.*
 *.tfplan
+tfplan
+plan-output.txt
 .terraform/
 crash.log
 crash.*.log
