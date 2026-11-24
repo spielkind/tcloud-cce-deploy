@@ -70,6 +70,27 @@ jobs:
           tofu_version: "~1.13"
           tofu_wrapper: false
 
+      - name: OpenTofu Init (Infra)
+        working-directory: infra
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.OTC_ACCESS_KEY }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.OTC_SECRET_KEY }}
+        run: bash ../scripts/init-stack.sh infra
+
+      # CCE deletes a hibernated cluster only after it is woken up; workloads need the API.
+      - name: Check power state
+        working-directory: infra
+        run: |
+          CLUSTER_ID=$(tofu output -raw cce_cluster_id 2>/dev/null || true)
+          rc=0
+          if [ -n "$CLUSTER_ID" ]; then
+            python3 ../scripts/env-power.py check --cluster-id "$CLUSTER_ID" || rc=$?
+          fi
+          if [ "$rc" = 3 ]; then
+            echo "::error::Environment '$DEPLOY_ENV' is powered off. Run Actions → Power → start first."
+          fi
+          exit "$rc"
+
       - name: OpenTofu Init (Workloads)
         working-directory: workloads
         env:
@@ -91,13 +112,6 @@ jobs:
           AWS_ACCESS_KEY_ID: ${{ secrets.OTC_ACCESS_KEY }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.OTC_SECRET_KEY }}
         run: tofu destroy -var-file="envs/${DEPLOY_ENV}.tfvars" -auto-approve -input=false
-
-      - name: OpenTofu Init (Infra)
-        working-directory: infra
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.OTC_ACCESS_KEY }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.OTC_SECRET_KEY }}
-        run: bash ../scripts/init-stack.sh infra
 
       - name: OpenTofu Destroy Plan (Infra)
         working-directory: infra

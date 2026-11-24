@@ -51,6 +51,7 @@ jobs:
       swr_org: ${{ steps.infra_outputs.outputs.swr_org }}
       swr_endpoint: ${{ steps.infra_outputs.outputs.swr_endpoint }}
       gpu_enabled: ${{ steps.infra_outputs.outputs.gpu_enabled }}
+      cluster_running: ${{ steps.power.outputs.running }}
     steps:
       - uses: actions/checkout@v7
 
@@ -74,6 +75,30 @@ jobs:
       - name: OpenTofu Init
         working-directory: infra
         run: bash ../scripts/init-stack.sh infra
+
+      # A hibernated cluster (Power workflow) cannot be planned/applied against.
+      - name: Check power state
+        id: power
+        working-directory: infra
+        run: |
+          CLUSTER_ID=$(tofu output -raw cce_cluster_id 2>/dev/null || true)
+          rc=0
+          if [ -n "$CLUSTER_ID" ]; then
+            python3 ../scripts/env-power.py check --cluster-id "$CLUSTER_ID" || rc=$?
+          fi
+          case $rc in
+            0) echo "running=true" >> "$GITHUB_OUTPUT" ;;
+            3)
+              if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
+                echo "::warning::Environment '$DEPLOY_ENV' is powered off; the workloads plan is skipped."
+                echo "running=false" >> "$GITHUB_OUTPUT"
+              else
+                echo "::error::Environment '$DEPLOY_ENV' is powered off. Run Actions → Power → start first."
+                exit 1
+              fi
+              ;;
+            *) exit "$rc" ;;
+          esac
 
       - name: OpenTofu Format Check
         working-directory: infra
@@ -212,6 +237,7 @@ jobs:
     if: |
       !cancelled() &&
       needs.infra.result == 'success' &&
+      needs.infra.outputs.cluster_running != 'false' &&
       (!inputs.apply ||
        needs.build-images.result == 'success' ||
        (needs.build-images.result == 'skipped' && !inputs.build_images))

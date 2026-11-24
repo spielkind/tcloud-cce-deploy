@@ -1,0 +1,78 @@
+# =============================================================================
+# Power Workflow — hibernate/wake the environment to save costs (manual only)
+#   stop:  hibernate the CCE cluster, then stop all node ECS
+#   start: start the node ECS, wake up the cluster, wait for Active nodes
+# Nothing is deleted; state, disks, PVs, EIPs and DNS stay unchanged.
+# =============================================================================
+
+name: Power
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "status, stop (hibernate + stop nodes) or start"
+        type: choice
+        options: [status, stop, start]
+        default: status
+      environment:
+        description: "Environment"
+        type: choice
+        options: [dev]
+        default: dev
+
+concurrency:
+  # Shared with deploy/destroy: never power off while a deploy is running.
+  group: deploy-${{ inputs.environment }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  DEPLOY_ENV: ${{ inputs.environment }}
+  TF_VAR_environment: ${{ inputs.environment }}
+
+jobs:
+  power:
+    name: Power ${{ inputs.action }}
+    environment: ${{ inputs.environment }}
+    runs-on: ubuntu-latest
+    env:
+      # Environment-scoped secrets/vars resolve only in jobs that reference the environment.
+      TF_VAR_otc_access_key: ${{ secrets.OTC_ACCESS_KEY }}
+      TF_VAR_otc_secret_key: ${{ secrets.OTC_SECRET_KEY }}
+      TF_VAR_otc_domain_name: ${{ secrets.OTC_DOMAIN_NAME }}
+      TF_VAR_otc_project_name: ${{ vars.OTC_PROJECT_NAME }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.OTC_ACCESS_KEY }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.OTC_SECRET_KEY }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Check configuration
+        run: |
+          if [ -z "$TF_VAR_otc_project_name" ]; then
+            echo "::error::Variable OTC_PROJECT_NAME is not set for environment '$DEPLOY_ENV' (Settings → Environments → $DEPLOY_ENV → Environment variables)."
+            exit 1
+          fi
+
+      - uses: opentofu/setup-opentofu@v2
+        with:
+          tofu_version: "~1.13"
+          tofu_wrapper: false
+
+      - name: OpenTofu Init (Infra)
+        working-directory: infra
+        run: bash ../scripts/init-stack.sh infra
+
+      - name: Power ${{ inputs.action }}
+        working-directory: infra
+        env:
+          ACTION: ${{ inputs.action }}
+        run: |
+          CLUSTER_ID=$(tofu output -raw cce_cluster_id 2>/dev/null || true)
+          if [ -z "$CLUSTER_ID" ]; then
+            echo "::error::No cce_cluster_id in the infra state of '$DEPLOY_ENV' (not deployed?)."
+            exit 1
+          fi
+          python3 ../scripts/env-power.py "$ACTION" --cluster-id "$CLUSTER_ID" --summary "$GITHUB_STEP_SUMMARY"

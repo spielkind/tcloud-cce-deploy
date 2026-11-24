@@ -112,10 +112,13 @@ Further documentation (index: [docs/README.md](docs/README.md), diagrams in [doc
 │   ├── openbao-seal.sh            # cce mode: pause auto-unseal and seal deliberately
 │   ├── lib-openbao-target.sh      # shared: cluster from infra state, KUBECONFIG check
 │   ├── test-kms.py                # KMS round-trip test for the unseal setup
+│   ├── env-power.py               # hibernate/wake the cluster + stop/start node ECS (Power workflow)
+│   ├── otc_api.py                 # shared signed OTC API client (env-power.py, destroy-cleanup.py)
 │   └── destroy-cleanup.py         # empties the SWR organization before destroy
 └── .github/workflows/
     ├── deploy.yml                 # Infra → Build Images (optional) → Workloads
     ├── destroy.yml                # Workloads → OpenBao modules → cleanup → Infra
+    ├── power.yml                  # manual: hibernate + stop nodes / start + wake (cost saving)
     └── lint.yml                   # fmt/validate, helm lint, ShellCheck, Ruff, actionlint
 ```
 
@@ -321,7 +324,7 @@ To remove the backend later: empty the versioned bucket (all object versions), t
 
 ## CI Workflows
 
-All workflows run OpenTofu `~1.13` and share the concurrency group `deploy` (no parallel deploy/destroy).
+All workflows run OpenTofu `~1.13`; Deploy, Destroy and Power share the concurrency group `deploy-<env>` (no parallel deploy/destroy/power per environment).
 
 ### Deploy (`.github/workflows/deploy.yml`)
 
@@ -335,7 +338,7 @@ Triggers: manual (**Actions → Deploy → Run workflow**) and pull requests to 
 
 Jobs:
 
-1. **Infra** — *Check configuration* fails early if `OTC_PROJECT_NAME` is missing or if `infra/envs/<env>.tfvars` / `workloads/envs/<env>.tfvars` still contain `# STATUS: template` (prod today). Then `init` with the env backend file, `fmt -check`, `validate`, `plan -var-file=envs/<env>.tfvars -out=tfplan` (plan in the job summary). With `apply`, `tofu apply tfplan` applies **exactly that saved plan**. Exports `swr_organization`, `swr_endpoint` and `gpu_node_pool_enabled` from the infra outputs.
+1. **Infra** — *Check configuration* fails early if `OTC_PROJECT_NAME` is missing or if `infra/envs/<env>.tfvars` / `workloads/envs/<env>.tfvars` still contain `# STATUS: template` (prod today). Then `init` with the env backend file, *Check power state* (a manual run fails while the environment is [powered off](#power-githubworkflowspoweryml); PR plans only warn and skip the workloads plan), `fmt -check`, `validate`, `plan -var-file=envs/<env>.tfvars -out=tfplan` (plan in the job summary). With `apply`, `tofu apply tfplan` applies **exactly that saved plan**. Exports `swr_organization`, `swr_endpoint` and `gpu_node_pool_enabled` from the infra outputs.
 2. **Build Images** (only with `apply` + `build_images`) — logs in to the SWR endpoint from the infra output and pushes `demo-app:<sha>` + `:latest`; `gpu-demo:<sha>` + `:latest` is built **only when a GPU pool exists** (`gpu_node_pool_enabled`).
 3. **Workloads** — plans in every run (also plan-only), `-out=tfplan`, and applies exactly that plan with `apply`. Image tags: a fresh build uses the commit SHA, otherwise the currently deployed tag (`demo_app_image_tag` / `gpu_demo_image_tag` outputs) is kept. Runs only if infra succeeded and the image build succeeded or was not requested.
 
@@ -349,7 +352,25 @@ Order with `apply`:
 2. `scripts/destroy-cleanup.py` — empties the SWR organization (SWR refuses to delete organizations with repositories).
 3. Saved destroy plan for the rest of infra (`plan -destroy -out=destroy-final.tfplan`) and `apply` of that plan.
 
+*Check power state* runs first and fails while the environment is [powered off](#power-githubworkflowspoweryml): CCE deletes a hibernated cluster only after it is woken up, and the workloads plan needs the Kubernetes API.
+
 The bootstrap bucket and key are never touched. Deleted KMS keys stay *pending deletion* for 7 days; key aliases carry random suffixes so destroy + redeploy works within that window.
+
+### Power (`.github/workflows/power.yml`)
+
+Manual only (**Actions → Power → Run workflow**). Powers an environment off and on to save costs without deleting anything: Tofu state, disks, PVs (OpenBao Raft), EIPs and DNS stay unchanged, OpenBao unseals itself via KMS after the start.
+
+| Input | Default | Meaning |
+|---|---|---|
+| `action` | `status` | `status` (read-only), `stop` or `start` |
+| `environment` | `dev` | Environment (cluster ID from `tofu output cce_cluster_id`) |
+
+- **stop** — hibernates the CCE cluster (masters are no longer billed), then stops all node ECS (`SOFT`).
+- **start** — starts the node ECS, wakes up the cluster (3–5 min) and waits until all nodes are `Active`. A GPU node that does not start (capacity) only produces a warning (it stays stopped and still counts against the pool's `max_count`); re-run **start** later to retry.
+
+Both actions are idempotent and end with a node/ECS table in the job summary. Hibernation alone is not enough: worker ECS keep running and are the larger part of the bill. Stopped ECS (including GPU flavors such as `pi5e`) are not billed for vCPU/memory/GPU; still billed while off: EVS disks, EIPs/bandwidth, NAT gateway, ELB, KMS, LTS/OBS. Deploy and Destroy refuse to run while the environment is off.
+
+Locally: `python3 scripts/env-power.py status --cluster-id "$(tofu -chdir=infra output -raw cce_cluster_id)"` (same credentials as [Local Usage](#local-usage)).
 
 ### Lint (`.github/workflows/lint.yml`)
 
@@ -687,7 +708,7 @@ The CCE **log-agent** addon ships container stdout, Kubernetes events and node l
 
 ## Costs
 
-Main cost drivers: CCE master flavor (`cce.s2.*` = 3 masters), worker and GPU nodes, EIPs/bandwidth (API, ingress, NAT, and in vm mode ELB, NAT and bastion), NAT gateways (one for CCE, one more in vm mode), ELBs, EVS volumes, KMS keys and LTS/OBS storage. Scale the GPU demo to zero (`gpu_demo_replicas = 0`) when not in use and destroy unused environments.
+Main cost drivers: CCE master flavor (`cce.s2.*` = 3 masters), worker and GPU nodes, EIPs/bandwidth (API, ingress, NAT, and in vm mode ELB, NAT and bastion), NAT gateways (one for CCE, one more in vm mode), ELBs, EVS volumes, KMS keys and LTS/OBS storage. Scale the GPU demo to zero (`gpu_demo_replicas = 0`) when not in use, power environments off outside working hours with the [Power workflow](#power-githubworkflowspoweryml) (masters and node compute are no longer billed) and destroy unused environments.
 
 ---
 
